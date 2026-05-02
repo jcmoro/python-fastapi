@@ -12,4 +12,48 @@ services:
     environment:
       ENV: dev
       LOG_LEVEL: DEBUG
+      DATABASE_URL: postgresql+asyncpg://catalog:catalog@db:5432/catalog
+      TEST_DATABASE_URL: postgresql+asyncpg://catalog:catalog@db-test:5432/catalog_test
+    depends_on:
+      db:
+        condition: service_healthy
+      db-test:
+        condition: service_healthy
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  db:
+    image: postgres:16-alpine
+    container_name: catalog-db
+    environment:
+      POSTGRES_USER: catalog
+      POSTGRES_PASSWORD: catalog
+      POSTGRES_DB: catalog
+    ports:
+      - "5432:5432"
+    volumes:
+      - catalog-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catalog -d catalog"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  db-test:
+    image: postgres:16-alpine
+    container_name: catalog-db-test
+    environment:
+      POSTGRES_USER: catalog
+      POSTGRES_PASSWORD: catalog
+      POSTGRES_DB: catalog_test
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catalog -d catalog_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  catalog-db-data:
