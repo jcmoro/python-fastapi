@@ -9,6 +9,8 @@ services:
       - ./tests:/app/tests
       - ./main.py:/app/main.py
       - ./pyproject.toml:/app/pyproject.toml
+      - ./alembic:/app/alembic
+      - ./alembic.ini:/app/alembic.ini
     environment:
       ENV: dev
       LOG_LEVEL: DEBUG

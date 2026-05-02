@@ -1,4 +1,4 @@
-.PHONY: help install run up down stop sh test unit-test integration-test e2e-test lint format build
+.PHONY: help install run up down stop sh test unit-test integration-test e2e-test lint format build migrate migration migrate-test
 
 DC = docker compose
 SERVICE = api
@@ -44,3 +44,12 @@ format: ## Auto-format code
 
 build: ## Build the docker image
 	$(DC) build
+
+migrate: ## Apply migrations to the dev database
+	$(DC) run --rm $(SERVICE) alembic upgrade head
+
+migrate-test: ## Apply migrations to the test database
+	$(DC) run --rm $(SERVICE) sh -lc 'DATABASE_URL=$$TEST_DATABASE_URL alembic upgrade head'
+
+migration: ## Create a new migration. Usage: make migration m="add products table"
+	$(DC) run --rm $(SERVICE) alembic revision --autogenerate -m "$(m)"
