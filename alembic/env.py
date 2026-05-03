@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 # Import the project's declarative Base and every module that registers models
 # against it. Adding a new context with its own ORM models requires importing
 # them here so autogenerate sees them.
+from contexts.catalog.infrastructure.persistence import models as _catalog_models  # noqa: F401
 from shared.infrastructure.db_base import Base
 from shared.infrastructure.settings import get_settings
 

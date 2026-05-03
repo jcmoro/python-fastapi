@@ -26,4 +26,9 @@ session_factory: async_sessionmaker[AsyncSession] = async_sessionmaker(
 
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with session_factory() as session:
-        yield session
+        try:
+            yield session
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise

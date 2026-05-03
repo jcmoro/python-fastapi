@@ -2,17 +2,6 @@
 
 A reference Python **FastAPI** project demonstrating clean, scalable, and maintainable architecture using **Domain-Driven Design (DDD)** and the **Hexagonal (Ports & Adapters)** pattern.
 
-The repo is intentionally small and opinionated: business logic stays pure, frameworks live at the edges, and every bounded context is a vertical slice with strict layering.
-
----
-
-## Goals
-
-- Keep **business logic pure** and isolated from frameworks.
-- Make **bounded contexts** the unit of feature ownership.
-- Validate everything at the boundary with **Pydantic v2**.
-- Stay simple: **no abstraction without a present need**.
-
 ---
 
 ## Stack
@@ -106,21 +95,6 @@ API is served on `http://localhost:8000` with auto-generated docs:
 
 ---
 
-## Conventions
-
-- `snake_case` for modules/functions/variables; `PascalCase` for classes; `*DTO` suffix for data transfer objects.
-- Type hints required; **avoid `Any`**.
-- Domain layer must never import infrastructure or framework code.
-- DTOs are **data-only** and immutable where possible.
-- Use `ORJSONResponse` (powered by `orjson`) as the FastAPI `default_response_class`.
-- Endpoints must declare `summary`, `description`, `response_model`, `status_code`, and `tags`.
-- Annotate every Pydantic field with `Field(..., description=..., examples=[...])` so OpenAPI is self-documenting.
-- Configuration only via `BaseSettings`; never read `os.environ` directly outside `shared/infrastructure/settings`.
-- Async where I/O happens; sync where CPU work happens. Don't block the event loop.
-- Atomic, minimal PRs. Lint and tests must pass before opening.
-
----
-
 ## Testing
 
 | Suite        | Location               | What it covers                                              |
@@ -129,29 +103,4 @@ API is served on `http://localhost:8000` with auto-generated docs:
 | Integration  | `tests/integration/`   | Real adapters (DB, HTTP) against ephemeral services.        |
 | E2E          | `tests/e2e/`           | FastAPI `TestClient` exercising the full app.               |
 
-Each use case must include **at least one unit test**. Tests validate behavior, not implementation details.
-
 ---
-
-## API Documentation
-
-This project treats OpenAPI as a first-class deliverable:
-
-- App-level `title`, `description`, `version`, `contact`, and `license_info` are set on the `FastAPI` instance.
-- Long endpoint descriptions live in `docs/api_docs/<method>_<path>.md` and are loaded via `Path().read_text()` into the route's `description`.
-- Error responses are documented per route via the `responses=` parameter.
-- Pydantic v2 `Field(examples=[...])` drives the request/response examples.
-
----
-
-## References
-
-- [FastAPI + DDD](https://medium.com/p/3b92be4e436c)
-- [FastAPI in Production: 7 Mistakes That Will Destroy Your App](https://medium.com/@inprogrammer/fastapi-in-production-7-mistakes-that-will-destroy-your-app-ea42b4bf2c54)
-- [How to Document an API for Python FastAPI](https://medium.com/codex/how-to-document-an-api-for-python-fastapi-best-practices-for-maintainable-and-readable-code-a183a3f7f036)
-
----
-
-## License
-
-TBD

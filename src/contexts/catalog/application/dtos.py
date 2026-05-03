@@ -34,3 +34,17 @@ class CreateProductCommand:
     name: str
     price_cents: int
     currency: str = "EUR"
+
+
+@dataclass(frozen=True, slots=True)
+class ListProductsQuery:
+    limit: int = 50
+    offset: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class UpdateProductCommand:
+    product_id: UUID
+    name: str | None = None
+    price_cents: int | None = None
+    currency: str | None = None

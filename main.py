@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.responses import ORJSONResponse
 
+from contexts.catalog.ui.routers.products import router as products_router
+from shared.infrastructure.exception_handlers import register_exception_handlers
 from shared.infrastructure.settings import get_settings
 
 
@@ -25,6 +27,9 @@ def create_app() -> FastAPI:
     )
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    register_exception_handlers(application)
+    application.include_router(products_router)
 
     return application
 
