@@ -37,34 +37,59 @@ Cross-context contracts travel as **DTOs only** — no shared domain models betw
 
 ### Project Layout
 
+The current shape (`catalog` is the only context so far). Subdirectories are introduced only when they earn their place — single-file modules are preferred for the first occupant of each layer.
+
 ```
 src/
   contexts/
-    <context_name>/
-      domain/
-        entities/
-        value_objects/
-        ports/             # Repository / service interfaces
-      application/
-        commands/          # Write use cases
-        queries/           # Read use cases
-        dtos/
-      infrastructure/
-        persistence/       # Adapter implementations of ports
-        http/
-      ui/
-        routers/           # FastAPI APIRouter modules
-        schemas/           # Pydantic request/response models
-        dependencies.py    # Context-scoped DI wiring
-  shared/
-    domain/                # Shared kernel (use sparingly)
-    infrastructure/        # Settings, logging, db, http client, errors
+    catalog/
+      domain/                          # No framework imports.
+        product.py                     # Entity (frozen dataclass + invariants)
+        exceptions.py                  # Domain errors (extend shared.domain.errors)
+        ports/
+          product_repository.py        # ABC defining the persistence contract
+      application/                     # Depends on domain only.
+        dtos.py                        # ProductDTO, command/query carriers
+        use_cases/
+          create_product.py
+          get_product.py
+          list_products.py
+          update_product.py
+          delete_product.py
+      infrastructure/                  # Adapters; the only place SQLAlchemy lives.
+        persistence/
+          models.py                    # ProductModel (ORM)
+          mappers.py                   # to_domain / to_model
+          sqlalchemy_product_repository.py
+      ui/                              # FastAPI surface.
+        schemas.py                     # Pydantic request/response models
+        routers/products.py            # Endpoints (POST/GET/PATCH/DELETE)
+        dependencies.py                # Per-context DI wiring
+  shared/                              # Cross-cutting only. Keep it small.
+    domain/
+      errors.py                        # DomainError + NotFoundError / ConflictError / InvalidInputError
+    infrastructure/
+      settings.py                      # Pydantic BaseSettings
+      database.py                      # async engine + session factory + get_session dep
+      db_base.py                       # SQLAlchemy declarative Base
+      exception_handlers.py            # Domain errors → HTTP responses
+alembic/
+  env.py                               # Async, reads URL from settings
+  script.py.mako                       # Migration template (Python 3.10 unions)
+  versions/                            # Generated migration files
+alembic.ini
 tests/
-  unit/
-  integration/
-  e2e/
-main.py                    # Composes routers, builds the FastAPI app
+  conftest.py                          # make_product, db_engine, db_session, client (sync)
+  unit/                                # Pure logic. No I/O.
+  integration/                         # Real postgres, transaction-rollback isolation.
+  e2e/                                 # AsyncClient + ASGITransport against the full app.
+main.py                                # create_app() — composes routers + handlers
+docker-compose.yml                     # api + db + db-test (db-test on tmpfs)
+Dockerfile
+Makefile
 ```
+
+When a layer's single file grows or a second concept ships, that file gets promoted to a directory (e.g. `domain/product.py` → `domain/product/{entity.py,value_objects.py}`). Don't introduce the directory speculatively.
 
 ---
 
@@ -75,16 +100,22 @@ main.py                    # Composes routers, builds the FastAPI app
 ```bash
 cp .env.example .env
 
-make install      # Build the docker image (installs deps inside)
-make run          # Start dev server in the foreground (uvicorn --reload)
-make up           # Same, in the background
-make down         # Stop and remove containers
+make install            # Build the docker image (installs deps inside)
+make migrate            # Apply migrations to the dev database
+make migrate-test       # Apply migrations to the test database (required before make test)
+make run                # Start dev server in the foreground (uvicorn --reload)
+make up                 # Same, in the background
+make down               # Stop and remove containers
 
-make test         # Full test suite (in container)
-make unit-test    # Unit tests only
-make lint         # ruff + pylint + mypy
-make format       # auto-format
-make sh           # Shell into the running api container
+make test               # Full test suite
+make unit-test          # Unit tests only (no I/O)
+make integration-test   # Integration tests (real postgres)
+make e2e-test           # E2E tests (HTTP via TestClient/AsyncClient)
+make lint               # ruff + pylint + mypy
+make format             # auto-format
+make sh                 # Shell into a fresh api container
+
+make migration m="add foo"  # Generate a new Alembic migration via autogenerate
 ```
 
 API is served on `http://localhost:8000` with auto-generated docs:
@@ -99,8 +130,8 @@ API is served on `http://localhost:8000` with auto-generated docs:
 
 | Suite        | Location               | What it covers                                              |
 |--------------|------------------------|-------------------------------------------------------------|
-| Unit         | `tests/unit/`          | Pure domain and application logic. **No I/O.**              |
-| Integration  | `tests/integration/`   | Real adapters (DB, HTTP) against ephemeral services.        |
-| E2E          | `tests/e2e/`           | FastAPI `TestClient` exercising the full app.               |
+| Unit         | `tests/unit/`          | Pure domain and application logic. Mocks at the port boundary via `FakeProductRepository`. **No I/O.** |
+| Integration  | `tests/integration/`   | Real `SqlAlchemyProductRepository` against `db-test`. Transaction-rollback per test for isolation. |
+| E2E          | `tests/e2e/`           | Full HTTP via `httpx.AsyncClient` + `ASGITransport`. App's `get_session` is overridden to share the test transaction. |
 
 ---
