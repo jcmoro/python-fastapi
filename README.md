@@ -12,7 +12,7 @@ A reference Python **FastAPI** project demonstrating clean, scalable, and mainta
 | Web framework    | FastAPI + Uvicorn                     |
 | Validation       | Pydantic v2                           |
 | Settings         | `pydantic-settings` (`BaseSettings`)  |
-| Serialization    | `orjson` (via `ORJSONResponse`)       |
+| Serialization    | FastAPI native (Pydantic core)        |
 | Tests            | `pytest`, `pytest-asyncio`, `httpx`   |
 | Static checks    | `pylint`, `ruff`, `mypy`              |
 | Packaging        | `pyproject.toml`                      |

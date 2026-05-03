@@ -1,5 +1,4 @@
 from fastapi import FastAPI
-from fastapi.responses import ORJSONResponse
 
 from contexts.catalog.ui.routers.products import router as products_router
 from shared.infrastructure.exception_handlers import register_exception_handlers
@@ -13,7 +12,6 @@ def create_app() -> FastAPI:
         title=settings.app_name,
         version=settings.app_version,
         description="Reference FastAPI project: clean architecture (DDD + Hexagonal).",
-        default_response_class=ORJSONResponse,
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
