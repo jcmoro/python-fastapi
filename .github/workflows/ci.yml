@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (ruff + pylint + mypy)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build api image (with GHA layer cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: fastapi-api:ci
+          cache-from: type=gha,scope=fastapi-api
+          cache-to: type=gha,mode=max,scope=fastapi-api
+
+      - name: Tag image for compose
+        run: docker tag fastapi-api:ci fastapi-api:latest
+
+      - name: Run linters
+        run: make lint
+
+  test:
+    name: Tests (unit + integration + e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build api image (with GHA layer cache)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: fastapi-api:ci
+          cache-from: type=gha,scope=fastapi-api
+          cache-to: type=gha,mode=max,scope=fastapi-api
+
+      - name: Tag image for compose
+        run: docker tag fastapi-api:ci fastapi-api:latest
+
+      - name: Apply migrations to test DB
+        run: make migrate-test
+
+      - name: Run full test suite
+        run: make test
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

@@ -1,6 +1,7 @@
 services:
   api:
     build: .
+    image: fastapi-api:latest
     container_name: catalog-api
     ports:
       - "8000:8000"

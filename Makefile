@@ -22,7 +22,7 @@ stop: ## Stop containers (keep them)
 	$(DC) stop
 
 sh: ## Open a shell in the api container
-	$(DC) run --rm $(SERVICE) sh
+	$(DC) run --rm --no-deps $(SERVICE) sh
 
 test: ## Run the full test suite
 	$(DC) run --rm $(SERVICE) pytest
@@ -37,10 +37,10 @@ e2e-test: ## Run end-to-end tests
 	$(DC) run --rm $(SERVICE) pytest tests/e2e
 
 lint: ## Run linters (ruff + pylint + mypy)
-	$(DC) run --rm $(SERVICE) sh -lc "ruff check . && pylint src main.py && mypy src main.py"
+	$(DC) run --rm --no-deps $(SERVICE) sh -lc "ruff check . && pylint src main.py && mypy src main.py"
 
 format: ## Auto-format code
-	$(DC) run --rm $(SERVICE) ruff format .
+	$(DC) run --rm --no-deps $(SERVICE) ruff format .
 
 build: ## Build the docker image
 	$(DC) build
