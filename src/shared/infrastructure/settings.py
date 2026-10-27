@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -62,6 +63,37 @@ class Settings(BaseSettings):
         default=False,
         description="Only load the model from the cache, never download it. "
         "The Docker image bakes the model in and sets this to true.",
+    )
+    selector_provider: Literal["claude"] = Field(
+        default="claude",
+        description="Candidate assessor used by the recommendation tool.",
+    )
+    selector_top_n: int = Field(
+        default=10, ge=1, description="Retrieval results passed to the candidate selector."
+    )
+    selector_max_concurrency: int = Field(
+        default=10, ge=1, description="Assessor API calls in flight at the same time."
+    )
+    selector_timeout_s: float = Field(
+        default=10.0, gt=0, description="Overall deadline for assessing all candidates."
+    )
+    selector_samples: int = Field(
+        default=3, ge=1, description="Self-consistency samples per candidate (Claude assessor)."
+    )
+    selector_max_tokens: int = Field(
+        default=1024, ge=1, description="Output token limit per assessor call."
+    )
+    selector_requirements_threshold: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
+        description="Minimum probability of 'meets the explicit requirements' to stay eligible.",
+    )
+    selector_min_score: float = Field(
+        default=0.5,
+        ge=0,
+        le=1,
+        description="Minimum probability of 'suitable for the use' to recommend a candidate.",
     )
     rag_top_k: int = Field(
         default=5,

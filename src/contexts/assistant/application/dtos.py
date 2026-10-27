@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from contexts.assistant.domain.candidate import Candidate
 from contexts.assistant.domain.completion import Completion
 from contexts.assistant.domain.retrieved_document import RetrievedDocument
+from contexts.assistant.domain.selection import SelectionReason
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,3 +64,34 @@ class IndexReportDTO:
     indexed: int
     unchanged: int
     deleted: int
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateDTO:
+    product_id: UUID
+    sku: str
+    name: str
+    price_cents: int
+    currency: str
+    retrieval_score: float
+
+    @classmethod
+    def from_candidate(cls, candidate: Candidate) -> CandidateDTO:
+        return cls(
+            product_id=candidate.product_id,
+            sku=candidate.sku,
+            name=candidate.name,
+            price_cents=candidate.price_cents,
+            currency=candidate.currency,
+            retrieval_score=candidate.retrieval_score,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class RecommendationDTO:
+    product_id: UUID | None
+    score: float | None
+    reason: SelectionReason
+    fallback_used: bool
+    candidates: tuple[CandidateDTO, ...]
+    assessed: int

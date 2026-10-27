@@ -10,6 +10,10 @@ from contexts.assistant.domain.catalog_product import CatalogProduct
 @dataclass(frozen=True, slots=True)
 class ProductDocument:
     product_id: UUID
+    sku: str
+    name: str
+    price_cents: int
+    currency: str
     content: str
     content_hash: str
 
@@ -21,6 +25,10 @@ class ProductDocument:
         fingerprint = f"{embedding_model}\n{content}"
         return cls(
             product_id=product.product_id,
+            sku=product.sku,
+            name=product.name,
+            price_cents=product.price_cents,
+            currency=product.currency,
             content=content,
             content_hash=hashlib.sha256(fingerprint.encode("utf-8")).hexdigest(),
         )

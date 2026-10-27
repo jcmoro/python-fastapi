@@ -1,6 +1,8 @@
 from uuid import UUID, uuid4
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from contexts.assistant.domain.product_document import EmbeddedDocument, ProductDocument
@@ -21,11 +23,20 @@ def _vector(*weights: tuple[int, float]) -> list[float]:
 
 
 def _embedded(
-    content: str, vector: list[float], product_id: UUID | None = None
+    content: str,
+    vector: list[float],
+    product_id: UUID | None = None,
+    sku: str | None = None,
 ) -> EmbeddedDocument:
     return EmbeddedDocument(
         document=ProductDocument(
-            product_id=product_id or uuid4(), content=content, content_hash=f"hash-{content}"
+            product_id=product_id or uuid4(),
+            sku=sku or f"SKU-{content.upper()}",
+            name=f"Name {content}",
+            price_cents=1999,
+            currency="EUR",
+            content=content,
+            content_hash=f"hash-{content}",
         ),
         embedding=vector,
     )
@@ -119,3 +130,44 @@ class TestDocumentSearch:
 
     async def test_empty_index_returns_no_results(self, search: SqlAlchemyDocumentSearch) -> None:
         assert await search.search(_vector((0, 1.0)), k=5) == []
+
+
+class TestReadModelColumns:
+    async def test_a7_upsert_stores_the_catalog_columns(
+        self, index: SqlAlchemyDocumentIndex, db_session: AsyncSession
+    ) -> None:
+        item = _embedded("widget", _vector((0, 1.0)), sku="SKU-W")
+
+        await index.upsert([item])
+
+        row = (
+            await db_session.execute(
+                text(
+                    "SELECT sku, name, price_cents, currency FROM product_documents "
+                    "WHERE product_id = :pid"
+                ),
+                {"pid": item.document.product_id},
+            )
+        ).one()
+        assert tuple(row) == ("SKU-W", "Name widget", 1999, "EUR")
+
+    async def test_a7_a_row_missing_catalog_columns_reports_no_hash(
+        self, index: SqlAlchemyDocumentIndex, db_session: AsyncSession
+    ) -> None:
+        product_id = uuid4()
+        await db_session.execute(
+            text(
+                "INSERT INTO product_documents "
+                "(product_id, content, content_hash, embedding, updated_at) "
+                "VALUES (:pid, 'legacy', 'hash-legacy', :embedding, now())"
+            ),
+            {"pid": product_id, "embedding": str(_vector((0, 1.0)))},
+        )
+
+        assert (await index.content_hashes())[product_id] is None
+
+    async def test_a8_sku_is_unique_in_the_index(self, index: SqlAlchemyDocumentIndex) -> None:
+        await index.upsert([_embedded("first", _vector((0, 1.0)), sku="SKU-DUP")])
+
+        with pytest.raises(IntegrityError):
+            await index.upsert([_embedded("second", _vector((1, 1.0)), sku="SKU-DUP")])

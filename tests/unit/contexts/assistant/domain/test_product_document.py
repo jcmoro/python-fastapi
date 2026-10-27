@@ -69,3 +69,17 @@ class TestContentHashCoversTheModel:
 
         assert first.content == second.content
         assert first.content_hash != second.content_hash
+
+
+class TestCatalogFields:
+    def test_a7_carries_the_catalog_fields(self) -> None:
+        product = _product()
+
+        document = ProductDocument.from_catalog_product(product, embedding_model=MODEL)
+
+        assert (document.sku, document.name, document.price_cents, document.currency) == (
+            "WIDGET-001",
+            "Blue widget",
+            1999,
+            "EUR",
+        )

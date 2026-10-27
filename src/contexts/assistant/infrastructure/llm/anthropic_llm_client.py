@@ -1,13 +1,11 @@
 import time
 
-from anthropic import APIConnectionError, APIStatusError, AsyncAnthropic, RateLimitError
+from anthropic import AsyncAnthropic
 from anthropic.types import TextBlock
 
 from contexts.assistant.domain.completion import Completion
-from contexts.assistant.domain.exceptions import LLMUnavailableError
 from contexts.assistant.domain.ports.llm_client import LLMClient
-
-_UNAVAILABLE_MESSAGE = "the language model is unavailable"
+from contexts.assistant.infrastructure.llm.anthropic_errors import transient_errors_as_unavailable
 
 
 class AnthropicLLMClient(LLMClient):
@@ -19,19 +17,13 @@ class AnthropicLLMClient(LLMClient):
 
     async def complete(self, *, system: str, prompt: str, max_tokens: int) -> Completion:
         started = time.perf_counter()
-        try:
+        with transient_errors_as_unavailable():
             message = await self._client.messages.create(
                 model=self._model,
                 max_tokens=max_tokens,
                 system=system,
                 messages=[{"role": "user", "content": prompt}],
             )
-        except (APIConnectionError, RateLimitError) as exc:
-            raise LLMUnavailableError(_UNAVAILABLE_MESSAGE) from exc
-        except APIStatusError as exc:
-            if exc.status_code < 500:
-                raise
-            raise LLMUnavailableError(_UNAVAILABLE_MESSAGE) from exc
         latency_ms = round((time.perf_counter() - started) * 1000)
 
         return Completion(

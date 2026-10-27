@@ -25,18 +25,38 @@ class FakeCatalogReader(CatalogReader):
         return [pid for pid in product_ids if pid not in existing]
 
 
+class DuplicateSkuInIndexError(Exception):
+    pass
+
+
 class FakeDocumentIndex(DocumentIndex):
     def __init__(self) -> None:
         self.documents: dict[UUID, EmbeddedDocument] = {}
+        self.incomplete: set[UUID] = set()
         self.upsert_sizes: list[int] = []
 
-    async def content_hashes(self) -> dict[UUID, str]:
-        return {pid: item.document.content_hash for pid, item in self.documents.items()}
+    async def content_hashes(self) -> dict[UUID, str | None]:
+        return {
+            pid: None if pid in self.incomplete else item.document.content_hash
+            for pid, item in self.documents.items()
+        }
 
     async def upsert(self, documents: list[EmbeddedDocument]) -> None:
         self.upsert_sizes.append(len(documents))
         for item in documents:
+            owner = next(
+                (
+                    pid
+                    for pid, stored in self.documents.items()
+                    if stored.document.sku == item.document.sku
+                    and pid != item.document.product_id
+                ),
+                None,
+            )
+            if owner is not None:
+                raise DuplicateSkuInIndexError(item.document.sku)
             self.documents[item.document.product_id] = item
+            self.incomplete.discard(item.document.product_id)
 
     async def delete(self, product_ids: list[UUID]) -> None:
         for product_id in product_ids:

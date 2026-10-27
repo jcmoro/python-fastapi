@@ -7,7 +7,7 @@
 A reference **Generative AI backend** in Python: a **RAG** assistant that answers from a product catalog, built with **FastAPI**, **Domain-Driven Design (DDD)** and the **Hexagonal (Ports & Adapters)** pattern. The LLM, the embeddings and the vector store are adapters behind ports — swap providers, fake them in tests, and keep them out of your domain.
 
 [![CI](https://github.com/jcmoro/python-fastapi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jcmoro/python-fastapi/actions/workflows/ci.yml)
-![Tests](https://img.shields.io/badge/tests-137%20passing-2e7d32?style=flat)
+![Tests](https://img.shields.io/badge/tests-192%20passing-2e7d32?style=flat)
 ![Architecture](https://img.shields.io/badge/architecture-DDD%20%2B%20Hexagonal-2e7d32?style=flat)
 ![mypy](https://img.shields.io/badge/mypy-strict-1565c0?style=flat)
 ![GenAI](https://img.shields.io/badge/GenAI-RAG%20assistant-6a1b9a?style=flat)
@@ -172,27 +172,35 @@ src/
         question.py                    # Value object (stripped, non-empty, ≤ 1,000 chars)
         completion.py                  # Completion: text, model, tokens, latency
         catalog_product.py             # assistant's own view of a product
-        product_document.py            # ProductDocument (content + content_hash), EmbeddedDocument
+        product_document.py            # ProductDocument (catalog fields, content, content_hash)
         retrieved_document.py          # Search hit with cosine similarity
-        exceptions.py                  # InvalidQuestionError, LLMUnavailableError
+        candidate.py                   # Candidate, RubricAnswers, Assessment (+ usage, failure reason)
+        assessment_usage.py            # API calls and tokens per assessment
+        rubric.py                      # The two yes/no rubric questions, defined once
+        selection.py                   # select(): filter, rank, tie-break, threshold — pure
+        exceptions.py                  # InvalidQuestionError, LLMUnavailableError, InvalidAssessmentError
         ports/
           llm_client.py                # LLMClient ABC — documents which failures it raises
           embedding_client.py          # One embedding per text, same order
           document_search.py           # Top-k, most similar first
           document_index.py            # Hashes, upsert, delete
           catalog_reader.py            # Products from the catalog, no duplicates
+          candidate_assessor.py        # One candidate per call; probabilities in [0, 1]
       application/
-        dtos.py                        # AskCommand, AnswerDTO, SourceDTO, UsageDTO, IndexReportDTO
+        dtos.py                        # Ask/Answer/Source/Usage/IndexReport/Candidate/Recommendation DTOs
         use_cases/
           ask_assistant.py             # Embed → retrieve → generate, fallback without generation
-          index_catalog.py             # Incremental reindex + orphan deletion
+          index_catalog.py             # Incremental reindex + orphan deletion (before upsert)
+          recommend_candidate.py       # Top-N, deadline, cancellation, select(), one log line
       infrastructure/                  # The only place anthropic, fastembed and pgvector live.
         llm/
+          anthropic_errors.py          # Shared transient-vs-configuration classification
           anthropic_llm_client.py      # Timeout, retries, error classification
+          claude_candidate_assessor.py # Rubric via structured output; 3 samples; per-call concurrency limit
         embeddings/
           fastembed_embedding_client.py
         persistence/
-          models.py                    # ProductDocumentModel (vector(384), HNSW cosine index)
+          models.py                    # ProductDocumentModel (vector(384), HNSW, unique sku)
           sqlalchemy_document_index.py
           sqlalchemy_document_search.py
         catalog/

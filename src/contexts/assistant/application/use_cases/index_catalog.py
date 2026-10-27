@@ -29,16 +29,16 @@ class IndexCatalog:
         ]
         stored_hashes = await self._document_index.content_hashes()
 
+        unlisted_ids = sorted(set(stored_hashes) - {doc.product_id for doc in documents})
+        orphan_ids = await self._catalog_reader.missing(unlisted_ids) if unlisted_ids else []
+        if orphan_ids:
+            await self._document_index.delete(orphan_ids)
+
         changed = [
             doc for doc in documents if stored_hashes.get(doc.product_id) != doc.content_hash
         ]
         for start in range(0, len(changed), self._batch_size):
             await self._index_batch(changed[start : start + self._batch_size])
-
-        unlisted_ids = sorted(set(stored_hashes) - {doc.product_id for doc in documents})
-        orphan_ids = await self._catalog_reader.missing(unlisted_ids) if unlisted_ids else []
-        if orphan_ids:
-            await self._document_index.delete(orphan_ids)
 
         return IndexReportDTO(
             indexed=len(changed),
