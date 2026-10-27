@@ -173,7 +173,7 @@ deleted=0` y después `indexed=0 unchanged=3 deleted=0`.
 | C8 | ✅ | Unitarios `test_c8_llm_unavailable_*`. E2E `test_c8_returns_200_with_fallback_when_llm_unavailable`: 200, `fallback_used=true`, `usage=null`. |
 | C9 | ✅ | E2E `test_c9_assistant_exposes_no_indexing_endpoint`: las rutas `/assistant*` de OpenAPI son exactamente `["/assistant/ask"]`. |
 | C10 | ✅ | Integración `test_c10_returns_the_nearest_document_first`, contra pgvector real: orden `near`, `middle`, `far`, con similitud ≈ 0,995 para el primero. |
-| C11 | ✅ local | `make lint`: ruff «All checks passed!», pylint 10.00/10, mypy «no issues found in 72 source files». `make test`: **137 passed** (antes 99), sin warnings. _CI: pendiente de la PR._ |
+| C11 | ✅ | `make lint`: ruff «All checks passed!», pylint 10.00/10, mypy «no issues found in 72 source files». `make test`: **137 passed** (antes 99), sin warnings. **CI de la PR #8:** run `40588443477` sobre `1d1d048`, en verde. En ambos jobs pasan el login en Docker Hub, la construcción de la imagen (con el modelo dentro), las migraciones, el lint y los tests. |
 | C12 | ✅ | Plan actualizado, también con R1–R7. README: paso 2 del roadmap ✅, regla real sobre `catalog`, layout, stack, Quick Start (modelo en la imagen, `RAG_TOP_K` máximo 40) y testing al día, badge de 137 tests. Anclas y badges comprobados. |
 
 ### Recuperación real con el modelo multilingüe
