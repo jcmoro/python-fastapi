@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 
+from contexts.assistant.ui.routers.assistant import router as assistant_router
 from contexts.catalog.ui.routers.products import router as products_router
 from shared.infrastructure.exception_handlers import register_exception_handlers
 from shared.infrastructure.settings import get_settings
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(application)
     application.include_router(products_router)
+    application.include_router(assistant_router)
 
     return application
 

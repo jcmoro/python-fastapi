@@ -12,3 +12,7 @@ class ConflictError(DomainError):
 
 class InvalidInputError(DomainError):
     """A domain invariant has been violated. Maps to HTTP 422."""
+
+
+class ServiceUnavailableError(DomainError):
+    """A dependency required to fulfil the request is unavailable. Maps to HTTP 503."""
