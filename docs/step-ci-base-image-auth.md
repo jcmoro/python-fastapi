@@ -101,12 +101,47 @@ mayor, igual que el resto de actions del workflow; Dependabot la mantiene al dí
    unset GH_TOKEN
    ```
 
+## Incidencia al configurar los secrets
+
+Los intentos 1 y 2 del CI de la PR #5 fallaron en el login, en ambos jobs:
+
+```
+Error response from daemon: Get "https://registry-1.docker.io/v2/":
+unknown: malformed HTTP Authorization header
+```
+
+- **Diagnóstico:** las credenciales eran válidas. Un `docker login --password-stdin` local, con un
+  `DOCKER_CONFIG` temporal para no tocar la configuración del usuario, devolvió
+  `Login Succeeded`. El usuario y el token tampoco tenían comillas, espacios ni retornos de carro.
+  El fallo estaba en los valores guardados en GitHub: se habían introducido con `read` y `!` desde
+  Claude Code, donde no hay TTY, así que quedaron vacíos o mal.
+- **Arreglo:** se volvieron a guardar leyendo el `.env` local (ignorado por git) y enviándolos por
+  stdin con `printf '%s' ... | gh secret set`, en Actions y en Dependabot. El intento 3 pasó.
+- **Lección:** `gh secret set` y `docker login` con `read` necesitan una terminal real. Desde `!`
+  hay que pasar el valor por stdin desde un fichero o una variable, nunca con un prompt
+  interactivo.
+
 ## Criterios de cierre
 
 | Criterio | Evidencia |
 |---|---|
 | `actionlint` sin errores | Hecho: sin salida, exit 0. |
 | La imagen se construye con la nueva base | Hecho: `docker build --pull` local correcto. |
-| CI verde en la PR de este arreglo, con «Log in to Docker Hub» correcto en ambos jobs | _Pendiente: requiere los secrets._ |
-| CI verde en una PR de **Dependabot** tras el merge (rebase de #1, #2 o #3) | _Pendiente._ Confirma que los secrets de Dependabot llegan a sus ejecuciones. |
-| Job de lint verde en la PR #4 | _Pendiente._ |
+| CI verde en la PR de este arreglo, con «Log in to Docker Hub» correcto en ambos jobs | Hecho: PR #5, run `40549577833`, intento 3. En los dos jobs pasan login, build, lint, migraciones y tests. |
+| CI verde en una PR de **Dependabot** tras el merge (rebase de #1, #2 o #3) | Hecho, en las tres, todas con actor y disparador `dependabot[bot]`: #1 run `40554557052`, #2 run `40558395246`, #3 run `40554573505`. En todas pasan login, build, lint y tests, así que los secrets de Dependabot llegan a sus ejecuciones. Las tres están mergeadas. |
+| Job de lint verde en la PR #4 | Hecho: run `40559156496` sobre `9258f58`, el commit con el que «Update branch» de GitHub mergeó `main` en la rama. Pasan lint y tests. |
+
+## Notas de la verificación
+
+- **#2 no respondió a `@dependabot rebase`**, aunque GitHub la daba como mergeable y sin
+  conflictos. Con `@dependabot recreate` se regeneró sobre `main` y su CI pasó.
+- **La PR #4 se actualizó con un merge, no con un rebase.** El permiso de esta sesión bloquea el
+  push forzado (`Git Destructive`), así que se usó «Update branch» de GitHub, que hace el merge
+  en el servidor. Se comprobó que el contenido de la PR respecto a `main` no cambió: los mismos 36
+  ficheros, +1245/−6.
+
+## Pendiente (fuera de alcance)
+
+- `.github/dependabot.yml` pide las etiquetas `dependencies`, `python`, `github-actions` y
+  `docker`, y ninguna existe en el repo (comprobado con `gh label list`). Dependabot lo avisó en
+  la #2. Hay que crearlas o quitarlas de la configuración.
