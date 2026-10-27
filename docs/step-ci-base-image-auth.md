@@ -101,12 +101,32 @@ mayor, igual que el resto de actions del workflow; Dependabot la mantiene al dí
    unset GH_TOKEN
    ```
 
+## Incidencia al configurar los secrets
+
+Los intentos 1 y 2 del CI de la PR #5 fallaron en el login, en ambos jobs:
+
+```
+Error response from daemon: Get "https://registry-1.docker.io/v2/":
+unknown: malformed HTTP Authorization header
+```
+
+- **Diagnóstico:** las credenciales eran válidas. Un `docker login --password-stdin` local, con un
+  `DOCKER_CONFIG` temporal para no tocar la configuración del usuario, devolvió
+  `Login Succeeded`. El usuario y el token tampoco tenían comillas, espacios ni retornos de carro.
+  El fallo estaba en los valores guardados en GitHub: se habían introducido con `read` y `!` desde
+  Claude Code, donde no hay TTY, así que quedaron vacíos o mal.
+- **Arreglo:** se volvieron a guardar leyendo el `.env` local (ignorado por git) y enviándolos por
+  stdin con `printf '%s' ... | gh secret set`, en Actions y en Dependabot. El intento 3 pasó.
+- **Lección:** `gh secret set` y `docker login` con `read` necesitan una terminal real. Desde `!`
+  hay que pasar el valor por stdin desde un fichero o una variable, nunca con un prompt
+  interactivo.
+
 ## Criterios de cierre
 
 | Criterio | Evidencia |
 |---|---|
 | `actionlint` sin errores | Hecho: sin salida, exit 0. |
 | La imagen se construye con la nueva base | Hecho: `docker build --pull` local correcto. |
-| CI verde en la PR de este arreglo, con «Log in to Docker Hub» correcto en ambos jobs | _Pendiente: requiere los secrets._ |
+| CI verde en la PR de este arreglo, con «Log in to Docker Hub» correcto en ambos jobs | Hecho: PR #5, run `40549577833`, intento 3. En los dos jobs pasan login, build, lint, migraciones y tests. |
 | CI verde en una PR de **Dependabot** tras el merge (rebase de #1, #2 o #3) | _Pendiente._ Confirma que los secrets de Dependabot llegan a sus ejecuciones. |
 | Job de lint verde en la PR #4 | _Pendiente._ |
