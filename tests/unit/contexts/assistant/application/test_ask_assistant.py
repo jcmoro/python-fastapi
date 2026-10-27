@@ -1,5 +1,5 @@
 import pytest
-from tests.unit.contexts.assistant.application.conftest import FakeLLMClient
+from tests.fakes.llm_client import FakeLLMClient
 
 from contexts.assistant.application.dtos import AnswerDTO, AskCommand, UsageDTO
 from contexts.assistant.application.use_cases.ask_assistant import SYSTEM_PROMPT, AskAssistant

@@ -51,9 +51,10 @@ Delivered in four PRs. Each one is shippable on its own and keeps CI green.
 
 ### Infrastructure — `src/contexts/assistant/infrastructure/`
 
-- `llm/anthropic_llm_client.py` — `AnthropicLLMClient(LLMClient)`; wraps `AsyncAnthropic`, applies
-  the timeout, measures latency, reads token usage from the response, maps SDK errors and timeouts
-  to `LLMUnavailableError`.
+- `llm/anthropic_llm_client.py` — `AnthropicLLMClient(LLMClient)`; wraps `AsyncAnthropic`, sets
+  timeout and retries once at construction, measures latency, reads token usage from the response.
+  Transient SDK errors (connection, timeout, 429, 5xx) become `LLMUnavailableError`; configuration
+  errors (400/401/403/404) propagate unchanged (500).
 
 ### UI — `src/contexts/assistant/ui/`
 
@@ -65,14 +66,18 @@ Delivered in four PRs. Each one is shippable on its own and keeps CI green.
 
 - `domain/errors.py` — `ServiceUnavailableError(DomainError)`.
 - `infrastructure/exception_handlers.py` — maps `ServiceUnavailableError` to 503.
-- `settings.py` — `anthropic_api_key: SecretStr | None`, `llm_model: str`, `llm_timeout_s: float`,
-  `llm_max_tokens: int`.
+- `settings.py` — `anthropic_api_key: SecretStr | None`, `llm_model: str`, `llm_timeout_s: float`
+  (per attempt), `llm_max_retries: int` (default 0), `llm_max_tokens: int`.
 - `.env.example` — the new variables, key left empty.
 - `pyproject.toml` — add `anthropic`.
 
 ### Tests
 
-- `tests/unit/contexts/assistant/` — `FakeLLMClient` in `conftest.py`; tests for `Question`
+- `tests/fakes/llm_client.py` — `FakeLLMClient`, shared by unit and e2e.
+- `tests/integration/contexts/assistant/` — adapter against `httpx2.MockTransport`: error
+  classification and a single attempt when `max_retries=0`.
+- `tests/e2e/test_exception_handlers.py` — each shared domain error maps to its status code.
+- `tests/unit/contexts/assistant/` — tests for `Question`
   invariants, happy path, usage propagated to the DTO, `LLMUnavailableError` propagated when the
   fake raises.
 - `tests/e2e/test_assistant.py` — override the `LLMClient` dependency with the fake; 200, 422 on

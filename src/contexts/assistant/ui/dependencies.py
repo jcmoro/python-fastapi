@@ -18,6 +18,7 @@ def get_llm_client() -> LLMClient:
         client=AsyncAnthropic(api_key=api_key.get_secret_value() if api_key else None),
         model=settings.llm_model,
         timeout_s=settings.llm_timeout_s,
+        max_retries=settings.llm_max_retries,
     )
 
 

@@ -3,7 +3,7 @@ from collections.abc import AsyncIterator, Callable
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from main import create_app
-from tests.unit.contexts.assistant.application.conftest import FakeLLMClient
+from tests.fakes.llm_client import FakeLLMClient
 
 from contexts.assistant.domain.completion import Completion
 from contexts.assistant.ui.dependencies import get_llm_client
@@ -13,7 +13,6 @@ ClientFactory = Callable[[FakeLLMClient], AsyncClient]
 
 @pytest_asyncio.fixture
 async def client_with() -> AsyncIterator[ClientFactory]:
-    """Builds an AsyncClient whose ``LLMClient`` dependency is the given fake. No DB needed."""
     clients: list[AsyncClient] = []
 
     def _factory(llm_client: FakeLLMClient) -> AsyncClient:

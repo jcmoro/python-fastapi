@@ -37,7 +37,12 @@ class Settings(BaseSettings):
     llm_timeout_s: float = Field(
         default=30.0,
         gt=0,
-        description="Timeout in seconds for a single LLM request.",
+        description="Timeout in seconds for each LLM attempt.",
+    )
+    llm_max_retries: int = Field(
+        default=0,
+        ge=0,
+        description="Retries per LLM request. Wall-clock bound: llm_timeout_s * (retries + 1).",
     )
     llm_max_tokens: int = Field(
         default=4096,
