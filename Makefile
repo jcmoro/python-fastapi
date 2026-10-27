@@ -1,4 +1,4 @@
-.PHONY: help install run up down stop sh test unit-test integration-test e2e-test lint format build migrate migration migrate-test
+.PHONY: help install run up down stop sh test unit-test integration-test e2e-test lint format build migrate migration migrate-test reindex
 
 DC = docker compose
 SERVICE = api
@@ -50,6 +50,9 @@ migrate: ## Apply migrations to the dev database
 
 migrate-test: ## Apply migrations to the test database
 	$(DC) run --rm $(SERVICE) sh -lc 'DATABASE_URL=$$TEST_DATABASE_URL alembic upgrade head'
+
+reindex: ## Index catalog products for the assistant (incremental)
+	$(DC) run --rm $(SERVICE) python -m contexts.assistant.ui.cli.reindex
 
 migration: ## Create a new migration. Usage: make migration m="add products table"
 	$(DC) run --rm $(SERVICE) alembic revision --autogenerate -m "$(m)"

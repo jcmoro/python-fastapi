@@ -13,7 +13,9 @@ Delivered in four PRs. Each one is shippable on its own and keeps CI green.
   settings; default to the cheapest current Claude model for dev.
 - **Vector store**: `pgvector` inside the existing Postgres. No new infrastructure.
 - **Embeddings**: behind an `EmbeddingClient` port. Dev/CI adapter: `fastembed` (local ONNX model,
-  no API key, no cost). A hosted adapter (e.g. Voyage AI) can be added later without touching the domain.
+  no API key, no cost) with `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`
+  (384 dimensions, ~50 languages: Spanish and English questions both work). A hosted adapter
+  (e.g. Voyage AI) can be added later without touching the domain.
 - **Agent framework**: LangGraph, confined to `infrastructure/agent/`.
 - **Cross-context rule**: `assistant` never imports `catalog.domain`. It keeps its own read model
   (`product_documents`) fed through DTOs.
@@ -21,12 +23,16 @@ Delivered in four PRs. Each one is shippable on its own and keeps CI green.
   boundary, same pattern as `FakeProductRepository`.
 - **When the LLM fails**: PR 1 answers 503 (there is nothing to retrieve yet). From PR 2 on, a
   deterministic fallback answer (top-k search results without generation) with `fallback_used=true`.
-
-## Still open (need confirmation)
-
-- **Indexing trigger**: synchronous re-index inside `CreateProduct` / `UpdateProduct` (simple) vs.
-  a domain event + background worker (closer to production). _Recommendation_: synchronous now,
-  event later.
+- **Indexing trigger: reindex on demand.** `assistant` owns an `IndexCatalog` use case that reads
+  products through its own `CatalogReader` port (DTOs only) and updates `product_documents`.
+  `catalog` does not change and does not know `assistant` exists. It runs only via `make reindex`;
+  there is no public endpoint while the API has no authentication. Trade-off accepted: the index
+  is stale until the next reindex.
+  - *Rejected — synchronous inside `CreateProduct` / `UpdateProduct`*: makes `catalog` depend on
+    `assistant` and puts embedding latency on every write.
+  - *Future evolution (not in PR 2)*: `catalog` publishes `ProductCreated` / `ProductUpdated` /
+    `ProductDeleted` domain events through a transactional **outbox**; `assistant` consumes them
+    and reindexes only what changed. Needs an event/outbox mechanism the repo does not have yet.
 
 ---
 
@@ -89,21 +95,53 @@ Delivered in four PRs. Each one is shippable on its own and keeps CI green.
 
 - `docker-compose.yml` — `db` and `db-test` move to `pgvector/pgvector:pg16`.
 - Alembic migration — `CREATE EXTENSION IF NOT EXISTS vector`; table `product_documents`
-  (`product_id UUID PK`, `content TEXT`, `embedding vector(<dim>)`, `updated_at`), HNSW index
-  on `embedding` (cosine).
-- Domain ports — `EmbeddingClient.embed(texts) -> list[list[float]]`;
-  `DocumentSearch.search(embedding, k) -> list[RetrievedDocument]`; `DocumentIndex.upsert(...)`.
-- Infrastructure — `FastEmbedEmbeddingClient`, `SqlAlchemyDocumentSearch` / `SqlAlchemyDocumentIndex`
-  (`pgvector.sqlalchemy.Vector`).
-- Application — `IndexProduct` use case (takes a product DTO); `AskAssistant` now retrieves top-k,
-  puts them in the prompt and returns them as `sources`. `AnswerDTO` gains `sources` and
-  `fallback_used`.
+  (`product_id UUID PK`, `content TEXT`, `content_hash TEXT`, `embedding vector(384)`,
+  `updated_at`), HNSW index on `embedding` (cosine).
+- Domain ports —
+  - `EmbeddingClient.embed(texts) -> list[list[float]]`.
+  - `DocumentSearch.search(embedding, k) -> list[RetrievedDocument]`.
+  - `DocumentIndex`: read the stored `product_id → content_hash`, upsert documents, delete
+    documents by `product_id`.
+  - `CatalogReader.read_all() -> list[CatalogProduct]` — `assistant`'s own view of a product,
+    not `catalog`'s DTO. `CatalogReader.missing(ids)` confirms which ids really no longer exist
+    (paging is not snapshot-consistent, so absence from `read_all` is not proof of deletion).
+  - `EmbeddingClient.model_name` — part of the `content_hash`, so changing the model re-embeds.
+- Application —
+  - `IndexCatalog` use case, **incremental**: builds each product's document content and its
+    `content_hash`; embeds and upserts only new or changed products (Product has no
+    `updated_at`, so the hash — over model + content — is the change detector), in batches of
+    256; **deletes orphaned documents** only after `CatalogReader.missing` confirms the product no
+    longer exists. Returns counts (indexed, unchanged, deleted).
+  - `AskAssistant` now embeds the question, retrieves top-k, puts them in the prompt and returns
+    them as `sources`. `AnswerDTO` gains `sources` and `fallback_used`.
 - Fallback — `AskAssistant` catches `LLMUnavailableError` and returns the top-k results without
   generation, `fallback_used=true`, 200. The 503 from PR 1 no longer reaches the client.
+- Infrastructure —
+  - `FastEmbedEmbeddingClient` (model, cache dir and `local_files_only` from settings). The
+    `Dockerfile` downloads the model at build time; at runtime it is only loaded from disk and
+    warmed up in the app lifespan.
+  - `SqlAlchemyDocumentSearch` (own short-lived session, so no connection is held during the LLM
+    call) / `SqlAlchemyDocumentIndex` (`pgvector.sqlalchemy.Vector`). `RAG_TOP_K` ≤ 40
+    (HNSW default `ef_search`).
+  - `CatalogReader` adapter: the **only** place `assistant` touches `catalog`. It calls
+    `catalog`'s public application API (`ListProducts`, paginated) and maps `ProductDTO` to
+    `CatalogProduct`. Never `catalog.domain` or `catalog.infrastructure`.
+- UI (input adapters) —
+  - `ui/cli/reindex.py` — entry point `python -m contexts.assistant.ui.cli.reindex`. Builds
+    `IndexCatalog` with the **same dependency providers** as the API (`ui/dependencies.py`,
+    `shared/infrastructure/database.py`), runs it and prints the counts. An input adapter like
+    the router; reusable as a Kubernetes `Job` in PR 4.
+  - `Makefile` — `make reindex` runs that module in the `api` container.
+  - No HTTP endpoint for indexing.
 - `pyproject.toml` — add `pgvector`, `fastembed`.
-- Tests — unit with fakes (including fallback when the fake LLM raises); e2e asserts the fallback
-  flag instead of 503; integration for the search adapter against real `db-test`
-  (seed three documents, assert the nearest one comes back first).
+- Tests —
+  - Unit with fakes: incremental indexing (unchanged products are not re-embedded), **orphan
+    deletion**, retrieval in `AskAssistant`, fallback when the fake LLM raises.
+  - Integration against real `db-test`: search adapter (seed three documents, assert the nearest
+    one comes back first) and index adapter (upsert, hashes, delete).
+  - E2E asserts the fallback flag instead of 503.
+- README — mark roadmap step 2 as done and replace "`assistant` never imports `catalog`" with the
+  real rule (only the `CatalogReader` adapter, through `catalog`'s application API).
 
 ---
 
@@ -129,7 +167,8 @@ Delivered in four PRs. Each one is shippable on its own and keeps CI green.
 ## PR 4 — Deploy
 
 - `k8s/` — `Deployment` (liveness on `/healthz`), `Service`, `ConfigMap`, `Secret` (template only),
-  `Job` running `alembic upgrade head`, Postgres with pgvector for local use.
+  `Job` running `alembic upgrade head`, `Job` running `python -m contexts.assistant.ui.cli.reindex`,
+  Postgres with pgvector for local use.
 - `make k8s-up` / `make k8s-down` — runs on `kind` locally.
 - CI — optional job that creates a kind cluster, applies the manifests and hits `/healthz`.
 - Optional — the same image on AWS (App Runner or ECS Fargate + RDS with pgvector).

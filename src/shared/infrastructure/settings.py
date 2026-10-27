@@ -50,6 +50,27 @@ class Settings(BaseSettings):
         description="Maximum output tokens per LLM completion.",
     )
 
+    embedding_model: str = Field(
+        default="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2",
+        description="fastembed model used to embed catalog documents and questions.",
+    )
+    embedding_cache_dir: str | None = Field(
+        default=None,
+        description="Directory where fastembed caches the model. Unset: fastembed's default.",
+    )
+    embedding_local_files_only: bool = Field(
+        default=False,
+        description="Only load the model from the cache, never download it. "
+        "The Docker image bakes the model in and sets this to true.",
+    )
+    rag_top_k: int = Field(
+        default=5,
+        gt=0,
+        le=40,
+        description="Number of catalog documents retrieved per question. At most 40: the "
+        "HNSW index returns up to hnsw.ef_search (default 40) candidates per query.",
+    )
+
 
 @lru_cache
 def get_settings() -> Settings:
