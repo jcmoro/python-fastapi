@@ -173,3 +173,38 @@ class TestReviewFixes:
         assert report.indexed == 5
         assert [len(call) for call in embeddings.calls] == [2, 2, 1]
         assert index.upsert_sizes == [2, 2, 1]
+
+
+class TestReadModelColumns:
+    async def test_a7_reindexes_documents_missing_catalog_columns(
+        self,
+        use_case: IndexCatalog,
+        catalog: FakeCatalogReader,
+        embeddings: FakeEmbeddingClient,
+        index: FakeDocumentIndex,
+    ) -> None:
+        await use_case.execute()
+        embeddings.calls.clear()
+        incomplete = catalog.products[0]
+        index.incomplete.add(incomplete.product_id)
+
+        report = await use_case.execute()
+
+        assert report == IndexReportDTO(indexed=1, unchanged=2, deleted=0)
+        expected = ProductDocument.from_catalog_product(incomplete, embedding_model=MODEL)
+        assert embeddings.calls == [[expected.content]]
+        assert index.incomplete == set()
+
+    async def test_a8_a_reused_sku_does_not_break_the_reindex(
+        self, embeddings: FakeEmbeddingClient, index: FakeDocumentIndex
+    ) -> None:
+        original = _product("reused")
+        catalog = FakeCatalogReader([original])
+        await IndexCatalog(catalog, embeddings, index).execute()
+        replacement = replace(original, product_id=uuid4(), name="reused v2")
+        catalog.products = [replacement]
+
+        report = await IndexCatalog(catalog, embeddings, index).execute()
+
+        assert report == IndexReportDTO(indexed=1, unchanged=0, deleted=1)
+        assert set(index.documents) == {replacement.product_id}
