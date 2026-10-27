@@ -3,10 +3,35 @@ from typing import Annotated
 
 from anthropic import AsyncAnthropic
 from fastapi import Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from contexts.assistant.application.use_cases.ask_assistant import AskAssistant
+from contexts.assistant.application.use_cases.index_catalog import IndexCatalog
+from contexts.assistant.domain.ports.catalog_reader import CatalogReader
+from contexts.assistant.domain.ports.document_index import DocumentIndex
+from contexts.assistant.domain.ports.document_search import DocumentSearch
+from contexts.assistant.domain.ports.embedding_client import EmbeddingClient
 from contexts.assistant.domain.ports.llm_client import LLMClient
+from contexts.assistant.infrastructure.catalog.list_products_catalog_reader import (
+    ListProductsCatalogReader,
+)
+from contexts.assistant.infrastructure.embeddings.fastembed_embedding_client import (
+    FastEmbedEmbeddingClient,
+)
 from contexts.assistant.infrastructure.llm.anthropic_llm_client import AnthropicLLMClient
+from contexts.assistant.infrastructure.persistence.sqlalchemy_document_index import (
+    SqlAlchemyDocumentIndex,
+)
+from contexts.assistant.infrastructure.persistence.sqlalchemy_document_search import (
+    SqlAlchemyDocumentSearch,
+)
+from contexts.catalog.application.use_cases.get_product import GetProduct
+from contexts.catalog.application.use_cases.list_products import ListProducts
+from contexts.catalog.ui.dependencies import (
+    get_get_product_use_case,
+    get_list_products_use_case,
+)
+from shared.infrastructure.database import get_session, session_factory
 from shared.infrastructure.settings import get_settings
 
 
@@ -22,7 +47,51 @@ def get_llm_client() -> LLMClient:
     )
 
 
+@lru_cache
+def get_embedding_client() -> EmbeddingClient:
+    settings = get_settings()
+    return FastEmbedEmbeddingClient(
+        model_name=settings.embedding_model,
+        cache_dir=settings.embedding_cache_dir,
+        local_files_only=settings.embedding_local_files_only,
+    )
+
+
+def get_document_search() -> DocumentSearch:
+    return SqlAlchemyDocumentSearch(session_factory)
+
+
+def get_document_index(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> DocumentIndex:
+    return SqlAlchemyDocumentIndex(session)
+
+
+def get_catalog_reader(
+    list_products: Annotated[ListProducts, Depends(get_list_products_use_case)],
+    get_product: Annotated[GetProduct, Depends(get_get_product_use_case)],
+) -> CatalogReader:
+    return ListProductsCatalogReader(list_products, get_product)
+
+
 def get_ask_assistant_use_case(
     llm_client: Annotated[LLMClient, Depends(get_llm_client)],
+    embedding_client: Annotated[EmbeddingClient, Depends(get_embedding_client)],
+    document_search: Annotated[DocumentSearch, Depends(get_document_search)],
 ) -> AskAssistant:
-    return AskAssistant(llm_client, max_tokens=get_settings().llm_max_tokens)
+    settings = get_settings()
+    return AskAssistant(
+        llm_client,
+        embedding_client,
+        document_search,
+        max_tokens=settings.llm_max_tokens,
+        top_k=settings.rag_top_k,
+    )
+
+
+def get_index_catalog_use_case(
+    catalog_reader: Annotated[CatalogReader, Depends(get_catalog_reader)],
+    embedding_client: Annotated[EmbeddingClient, Depends(get_embedding_client)],
+    document_index: Annotated[DocumentIndex, Depends(get_document_index)],
+) -> IndexCatalog:
+    return IndexCatalog(catalog_reader, embedding_client, document_index)

@@ -4,13 +4,14 @@
 
 **Generative AI on FastAPI, done the clean way.**
 
-A reference **Generative AI backend** in Python: an LLM-powered assistant over a product catalog, built with **FastAPI**, **Domain-Driven Design (DDD)** and the **Hexagonal (Ports & Adapters)** pattern. The model is an adapter behind a port — swap providers, fake it in tests, and keep it out of your domain.
+A reference **Generative AI backend** in Python: a **RAG** assistant that answers from a product catalog, built with **FastAPI**, **Domain-Driven Design (DDD)** and the **Hexagonal (Ports & Adapters)** pattern. The LLM, the embeddings and the vector store are adapters behind ports — swap providers, fake them in tests, and keep them out of your domain.
 
 [![CI](https://github.com/jcmoro/python-fastapi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jcmoro/python-fastapi/actions/workflows/ci.yml)
-![Tests](https://img.shields.io/badge/tests-99%20passing-2e7d32?style=flat)
+![Tests](https://img.shields.io/badge/tests-137%20passing-2e7d32?style=flat)
 ![Architecture](https://img.shields.io/badge/architecture-DDD%20%2B%20Hexagonal-2e7d32?style=flat)
 ![mypy](https://img.shields.io/badge/mypy-strict-1565c0?style=flat)
-![GenAI](https://img.shields.io/badge/GenAI-LLM%20assistant-6a1b9a?style=flat)
+![GenAI](https://img.shields.io/badge/GenAI-RAG%20assistant-6a1b9a?style=flat)
+![pgvector](https://img.shields.io/badge/vectors-pgvector-336791?style=flat&logo=postgresql&logoColor=white)
 ![Claude](https://img.shields.io/badge/LLM-Claude-D97757?style=flat&logo=anthropic&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.162-009688?style=flat&logo=fastapi&logoColor=white)
@@ -36,8 +37,10 @@ A reference **Generative AI backend** in Python: an LLM-powered assistant over a
 Most GenAI demos wire the SDK straight into the route handler. This one treats the LLM like any other infrastructure dependency:
 
 - **The LLM is a port.** The domain defines `LLMClient`; `AnthropicLLMClient` is just one adapter. The domain and application layers never import `anthropic`.
-- **Tests never call a real model.** Unit and e2e tests use `FakeLLMClient` at the port boundary. The real adapter is tested against a mocked HTTP transport — no network, no cost.
-- **Failures have a contract.** Transient LLM failures (connection, timeout, 429, 5xx) return **503**. Configuration errors (bad key, unknown model) are not disguised as outages.
+- **Retrieval is a port too.** `EmbeddingClient` and `DocumentSearch` are ports; embeddings run locally with a multilingual model (no API key, no cost) and vectors live in the existing Postgres with `pgvector`.
+- **Indexing is explicit and incremental.** `make reindex` re-embeds only products whose content or embedding model changed (a `content_hash` per document), in batches, and deletes documents only after confirming their product no longer exists. `catalog` doesn't know the assistant exists.
+- **Tests never call a real model.** Unit and e2e tests use fakes at the port boundary (`FakeLLMClient`, `FakeEmbeddingClient`, `FakeDocumentSearch`). The real LLM adapter is tested against a mocked HTTP transport, and the vector adapters against a real pgvector database.
+- **Failures have a contract.** If the LLM is unavailable (connection, timeout, 429, 5xx), the answer still comes back — **200** with the retrieved products and `fallback_used: true`. Configuration errors (bad key, unknown model) are not disguised as outages.
 - **Latency is bounded.** `LLM_TIMEOUT_S` applies per attempt and `LLM_MAX_RETRIES` defaults to 0, so the worst case is `timeout * (retries + 1)`.
 - **Every answer reports its cost.** Responses include the model used, input/output tokens and latency.
 
@@ -45,9 +48,11 @@ Most GenAI demos wire the SDK straight into the route handler. This one treats t
 
 ## What works today
 
-`POST /assistant/ask` — ask a natural-language question and get the model's answer plus usage.
+Index the catalog, then ask. `POST /assistant/ask` retrieves the most similar products, answers from them and returns them as `sources`.
 
 ```bash
+make reindex                    # → indexed=3 unchanged=0 deleted=0 (incremental on later runs)
+
 curl -s -X POST http://localhost:8000/assistant/ask \
   -H 'Content-Type: application/json' \
   -d '{"question": "Which widgets cost less than 20 EUR?"}'
@@ -58,6 +63,14 @@ Example response (values are illustrative):
 ```json
 {
   "text": "…",
+  "sources": [
+    {
+      "product_id": "8f1c…",
+      "content": "SKU: PROD-1\nName: Blue widget\nPrice: 19.99 EUR",
+      "score": 0.61
+    }
+  ],
+  "fallback_used": false,
   "usage": {
     "model": "claude-haiku-5-5",
     "input_tokens": 52,
@@ -69,12 +82,11 @@ Example response (values are illustrative):
 
 | Status | When |
 |--------|------|
-| `200`  | The model answered. |
+| `200`  | The model answered from the retrieved products. Also when the LLM is unavailable (connection, timeout, 429, 5xx): then `fallback_used` is `true`, `usage` is `null` and the text lists the retrieved products. |
 | `422`  | Empty or blank question, more than 1,000 characters, or unknown fields. |
-| `503`  | The LLM is unavailable: connection error, timeout, rate limit (429) or server error (5xx). |
 | `500`  | Misconfiguration: missing or invalid API key, unknown model, invalid request. |
 
-The assistant does not read the catalog yet — that is what RAG (next on the roadmap) adds.
+The index reflects the catalog as of the last `make reindex`. There is deliberately no indexing endpoint while the API has no authentication.
 
 ---
 
@@ -85,7 +97,7 @@ Delivered as small, shippable PRs. Full plan: [`docs/plan-assistant-genai.md`](d
 | Step | Scope | Status |
 |------|-------|--------|
 | 1 | `LLMClient` port, Anthropic adapter, `POST /assistant/ask`, failure contract | ✅ Done |
-| 2 | **RAG** with `pgvector` in the existing Postgres: embeddings behind a port, top-k retrieval, `sources` in the answer, deterministic fallback when the LLM fails | ⏳ Planned |
+| 2 | **RAG** with `pgvector` in the existing Postgres: local multilingual embeddings behind a port, incremental `make reindex`, top-k retrieval, `sources` in the answer, deterministic fallback when the LLM fails | ✅ Done |
 | 3 | **Agent** with LangGraph: catalog tools, step limits, token usage summed across steps, offline evals | ⏳ Planned |
 | 4 | **Deploy**: Kubernetes manifests, local `kind` cluster, optional cloud target | ⏳ Planned |
 
@@ -98,6 +110,8 @@ Delivered as small, shippable PRs. Full plan: [`docs/plan-assistant-genai.md`](d
 | Language         | Python ≥ 3.10 (type hints required)                      |
 | Web framework    | FastAPI + Uvicorn                                        |
 | LLM              | Anthropic Claude (`anthropic` SDK), behind `LLMClient`   |
+| Embeddings       | `fastembed`, multilingual MiniLM (384 dims), local        |
+| Vector store     | `pgvector` (HNSW, cosine) in PostgreSQL 16               |
 | Validation       | Pydantic v2                                              |
 | Settings         | `pydantic-settings` (`BaseSettings`)                     |
 | Serialization    | FastAPI native (Pydantic core)                           |
@@ -121,7 +135,7 @@ DDD + Hexagonal. Each **bounded context** is a vertical slice with four layers:
 
 **Direction of dependencies points inward.** Outer layers depend on inner ones, never the reverse.
 
-Cross-context contracts travel as **DTOs only** — no shared domain models between bounded contexts. `assistant` never imports `catalog`.
+Cross-context contracts travel as **DTOs only** — no shared domain models between bounded contexts. `assistant` reaches `catalog` in exactly one adapter, `ListProductsCatalogReader`, through `catalog`'s application API (`ListProducts` + `ProductDTO`), plus its own dependency wiring. It never imports `catalog.domain` or `catalog.infrastructure`, and `catalog` never imports `assistant`.
 
 ### Project Layout
 
@@ -157,25 +171,42 @@ src/
       domain/                          # No anthropic, no FastAPI.
         question.py                    # Value object (stripped, non-empty, ≤ 1,000 chars)
         completion.py                  # Completion: text, model, tokens, latency
+        catalog_product.py             # assistant's own view of a product
+        product_document.py            # ProductDocument (content + content_hash), EmbeddedDocument
+        retrieved_document.py          # Search hit with cosine similarity
         exceptions.py                  # InvalidQuestionError, LLMUnavailableError
         ports/
           llm_client.py                # LLMClient ABC — documents which failures it raises
+          embedding_client.py          # One embedding per text, same order
+          document_search.py           # Top-k, most similar first
+          document_index.py            # Hashes, upsert, delete
+          catalog_reader.py            # Products from the catalog, no duplicates
       application/
-        dtos.py                        # AskCommand, AnswerDTO, UsageDTO
+        dtos.py                        # AskCommand, AnswerDTO, SourceDTO, UsageDTO, IndexReportDTO
         use_cases/
-          ask_assistant.py
-      infrastructure/                  # The only place the anthropic SDK lives.
+          ask_assistant.py             # Embed → retrieve → generate, fallback without generation
+          index_catalog.py             # Incremental reindex + orphan deletion
+      infrastructure/                  # The only place anthropic, fastembed and pgvector live.
         llm/
           anthropic_llm_client.py      # Timeout, retries, error classification
+        embeddings/
+          fastembed_embedding_client.py
+        persistence/
+          models.py                    # ProductDocumentModel (vector(384), HNSW cosine index)
+          sqlalchemy_document_index.py
+          sqlalchemy_document_search.py
+        catalog/
+          list_products_catalog_reader.py  # The only adapter that talks to catalog
       ui/
-        schemas.py                     # AskRequest, AnswerResponse
+        schemas.py                     # AskRequest, AnswerResponse, SourceResponse
         routers/assistant.py           # POST /assistant/ask
-        dependencies.py                # Per-context DI wiring
+        cli/reindex.py                 # make reindex → python -m contexts.assistant.ui.cli.reindex
+        dependencies.py                # Per-context DI wiring (shared by API and CLI)
   shared/                              # Cross-cutting only. Keep it small.
     domain/
       errors.py                        # DomainError + NotFound / Conflict / InvalidInput / ServiceUnavailable
     infrastructure/
-      settings.py                      # Pydantic BaseSettings (DB + LLM)
+      settings.py                      # Pydantic BaseSettings (DB + LLM + embeddings)
       database.py                      # async engine + session factory + get_session dep
       db_base.py                       # SQLAlchemy declarative Base
       exception_handlers.py            # Domain errors → 404 / 409 / 422 / 503
@@ -186,12 +217,12 @@ alembic/
 alembic.ini
 tests/
   conftest.py                          # make_product, db_engine, db_session, client (sync)
-  fakes/                               # Port-boundary fakes shared by suites (FakeLLMClient)
+  fakes/                               # Port-boundary fakes shared by suites (LLM, embeddings, documents)
   unit/                                # Pure logic. No I/O.
-  integration/                         # Real adapters: postgres, Anthropic client on a mocked transport.
+  integration/                         # Real adapters: postgres + pgvector, Anthropic client on a mocked transport.
   e2e/                                 # AsyncClient + ASGITransport against the full app.
 main.py                                # create_app() — composes routers + handlers
-docker-compose.yml                     # api + db + db-test (db-test on tmpfs)
+docker-compose.yml                     # api + db + db-test (pgvector images; db-test on tmpfs)
 Dockerfile
 Makefile
 ```
@@ -210,6 +241,7 @@ cp .env.example .env    # then set ANTHROPIC_API_KEY to use the assistant
 make install            # Build the docker image (installs deps inside)
 make migrate            # Apply migrations to the dev database
 make migrate-test       # Apply migrations to the test database (required before make test)
+make reindex            # Index catalog products for the assistant (incremental)
 make run                # Start dev server in the foreground (uvicorn --reload)
 make up                 # Same, in the background
 make down               # Stop and remove containers
@@ -225,7 +257,7 @@ make sh                 # Shell into a fresh api container
 make migration m="add foo"  # Generate a new Alembic migration via autogenerate
 ```
 
-LLM settings (all in `.env.example`): `ANTHROPIC_API_KEY`, `LLM_MODEL` (default `claude-haiku-5-5`), `LLM_TIMEOUT_S`, `LLM_MAX_RETRIES`, `LLM_MAX_TOKENS`.
+LLM settings (all in `.env.example`): `ANTHROPIC_API_KEY`, `LLM_MODEL` (default `claude-haiku-5-5`), `LLM_TIMEOUT_S`, `LLM_MAX_RETRIES`, `LLM_MAX_TOKENS`. Retrieval: `EMBEDDING_MODEL` (default `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`) and `RAG_TOP_K` (default 5, max 40). The embedding model (~0.24 GB) is **baked into the Docker image at build time**; at runtime it is only loaded from disk (`EMBEDDING_LOCAL_FILES_ONLY=true`, never downloaded) and warmed up when the app starts, so computing embeddings needs no network (the LLM call still does).
 
 API is served on `http://localhost:8000` with auto-generated docs:
 
@@ -239,8 +271,8 @@ API is served on `http://localhost:8000` with auto-generated docs:
 
 | Suite        | Location               | What it covers                                              |
 |--------------|------------------------|-------------------------------------------------------------|
-| Unit         | `tests/unit/`          | Pure domain and application logic. Mocks at the port boundary via `FakeProductRepository` and `FakeLLMClient`. **No I/O.** |
-| Integration  | `tests/integration/`   | Real `SqlAlchemyProductRepository` against `db-test` (transaction-rollback per test). Real `AnthropicLLMClient` on an `httpx2.MockTransport`: error classification and retry bound. |
-| E2E          | `tests/e2e/`           | Full HTTP via `httpx.AsyncClient` + `ASGITransport`. The DB session and the `LLMClient` are overridden; each domain error is checked against its status code. |
+| Unit         | `tests/unit/`          | Pure domain and application logic. Mocks at the port boundary via `FakeProductRepository`, `FakeLLMClient`, `FakeEmbeddingClient`, `FakeDocumentIndex` and `FakeDocumentSearch`. Covers incremental indexing and orphan deletion. **No I/O.** |
+| Integration  | `tests/integration/`   | Real `SqlAlchemyProductRepository` against `db-test` (transaction-rollback per test). Real `AnthropicLLMClient` on an `httpx2.MockTransport`: error classification and retry bound. Real pgvector adapters: upsert, hashes, delete, nearest-first search. Catalog reader across pages. |
+| E2E          | `tests/e2e/`           | Full HTTP via `httpx.AsyncClient` + `ASGITransport`. The DB session, `LLMClient`, `EmbeddingClient` and `DocumentSearch` are overridden; covers sources, fallback and that no indexing endpoint exists. Each domain error is checked against its status code. |
 
 ---

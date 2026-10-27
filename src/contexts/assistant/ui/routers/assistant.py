@@ -15,11 +15,12 @@ router = APIRouter(prefix="/assistant", tags=["assistant"])
     response_model=AnswerResponse,
     status_code=status.HTTP_200_OK,
     summary="Ask the assistant",
-    description="Answers a natural-language question using the configured LLM.",
-    responses={
-        422: {"description": "Invalid question."},
-        503: {"description": "The language model is unavailable."},
-    },
+    description=(
+        "Retrieves the catalog products most similar to the question and answers with the "
+        "configured LLM, returning them as `sources`. If the LLM is unavailable, answers 200 "
+        "with the retrieved products and `fallback_used=true`."
+    ),
+    responses={422: {"description": "Invalid question."}},
 )
 async def ask_endpoint(
     body: AskRequest,
