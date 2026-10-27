@@ -1,14 +1,18 @@
 class DomainError(Exception):
-    """Base class for all domain errors that map to HTTP responses."""
+    pass
 
 
 class NotFoundError(DomainError):
-    """Resource not found. Maps to HTTP 404."""
+    pass
 
 
 class ConflictError(DomainError):
-    """Domain-level conflict, e.g. uniqueness violation. Maps to HTTP 409."""
+    pass
 
 
 class InvalidInputError(DomainError):
-    """A domain invariant has been violated. Maps to HTTP 422."""
+    pass
+
+
+class ServiceUnavailableError(DomainError):
+    pass
