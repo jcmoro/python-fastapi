@@ -1,6 +1,31 @@
+<div align="center">
+
 # python-fastapi
 
+**FastAPI, done the clean way.**
+
 A reference Python **FastAPI** project demonstrating clean, scalable, and maintainable architecture using **Domain-Driven Design (DDD)** and the **Hexagonal (Ports & Adapters)** pattern.
+
+[![CI](https://github.com/jcmoro/python-fastapi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jcmoro/python-fastapi/actions/workflows/ci.yml)
+![Tests](https://img.shields.io/badge/tests-85%20passing-2e7d32?style=flat)
+![Architecture](https://img.shields.io/badge/architecture-DDD%20%2B%20Hexagonal-2e7d32?style=flat)
+![mypy](https://img.shields.io/badge/mypy-strict-1565c0?style=flat)
+![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.162-009688?style=flat&logo=fastapi&logoColor=white)
+![Pydantic](https://img.shields.io/badge/Pydantic-v2-E92063?style=flat&logo=pydantic&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?style=flat&logo=postgresql&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-compose-2496ED?style=flat&logo=docker&logoColor=white)
+![Claude](https://img.shields.io/badge/LLM-Claude-D97757?style=flat&logo=anthropic&logoColor=white)
+
+### [**→ Quick Start**](#quick-start)
+
+[Stack](#stack) ·
+[Architecture](#architecture) ·
+[Project Layout](#project-layout) ·
+[Testing](#testing) ·
+[Issues](https://github.com/jcmoro/python-fastapi/issues)
+
+</div>
 
 ---
 
