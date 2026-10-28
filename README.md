@@ -107,7 +107,7 @@ Delivered as small, shippable PRs. Full plan: [`docs/plan-assistant-genai.md`](d
 |------|-------|--------|
 | 1 | `LLMClient` port, Anthropic adapter, `POST /assistant/ask`, failure contract | ✅ Done |
 | 2 | **RAG** with `pgvector` in the existing Postgres: local multilingual embeddings behind a port, incremental `make reindex`, top-k retrieval, `sources` in the answer, deterministic fallback when the LLM fails | ✅ Done |
-| 3 | **Agent** with LangGraph: candidate selection by rubric and pure `select()` (3a), agent with catalog tools, step limit and summed token usage (3b), evals E1–E4 | 🔄 3a done, 3b in review |
+| 3 | **Agent** with LangGraph: candidate selection by rubric and pure `select()` (3a), agent with catalog tools, step limit and summed token usage (3b), evals E1–E4 | ✅ Done |
 | 4 | **Deploy**: Kubernetes manifests, local `kind` cluster, optional cloud target | ⏳ Planned |
 
 ---
