@@ -30,6 +30,7 @@ class ModelTurn:
     model: str
     input_tokens: int
     output_tokens: int
+    stop_reason: str | None
 
 
 class AnthropicAgentModel:
@@ -93,4 +94,5 @@ class AnthropicAgentModel:
             model=message.model,
             input_tokens=message.usage.input_tokens,
             output_tokens=message.usage.output_tokens,
+            stop_reason=message.stop_reason,
         )

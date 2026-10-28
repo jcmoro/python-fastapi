@@ -1,3 +1,4 @@
+from dataclasses import replace
 from uuid import uuid4
 
 import pytest
@@ -23,6 +24,7 @@ from contexts.assistant.domain.agent import (
     AgentRecommendation,
     AgentResult,
     AgentStopReason,
+    AgentUnavailableError,
     AgentUsage,
 )
 from contexts.assistant.domain.completion import Completion
@@ -242,3 +244,77 @@ class TestAgentMode:
 
         assert result.recommendation is None
         assert result.stop_reason is None
+
+
+class TestReviewFixes:
+    async def test_rb2_agent_failure_after_selection_keeps_recommendation_and_sources(
+        self, embeddings: FakeEmbeddingClient, search: FakeDocumentSearch
+    ) -> None:
+        partial = AgentUnavailableError(
+            sources=(GADGET,),
+            recommendation=AGENT_RESULT.recommendation,
+            usage=AGENT_RESULT.usage,
+        )
+        use_case = AskAssistant(
+            FakeLLMClient(),
+            embeddings,
+            search,
+            max_tokens=256,
+            top_k=5,
+            agent=FakeCatalogAgent(error=partial),
+        )
+
+        result = await use_case.execute(AskCommand(question="Which boot for winter?"))
+
+        assert result.fallback_used is True
+        expected = AGENT_RESULT.recommendation
+        assert expected is not None
+        assert result.sources == (SourceDTO.from_retrieved(GADGET),)
+        assert result.recommendation == RecommendationSummaryDTO.from_agent(expected)
+        assert embeddings.calls == []
+
+    @pytest.mark.parametrize("stop_reason", ["max_tokens", "refusal"])
+    async def test_rb4_rag_mode_incomplete_answer_falls_back(
+        self, embeddings: FakeEmbeddingClient, search: FakeDocumentSearch, stop_reason: str
+    ) -> None:
+        completion = Completion(
+            text="Half an ans",
+            model="claude-test",
+            input_tokens=10,
+            output_tokens=256,
+            latency_ms=5,
+            stop_reason=stop_reason,
+        )
+        use_case = _use_case(FakeLLMClient(completion), embeddings, search)
+
+        result = await use_case.execute(AskCommand(question="What is a widget?"))
+
+        assert result.fallback_used is True
+        assert result.model_stop_reason == stop_reason
+        assert result.text.startswith(FALLBACK_WITH_SOURCES)
+
+    async def test_rb4_agent_mode_incomplete_answer_falls_back(
+        self, embeddings: FakeEmbeddingClient, search: FakeDocumentSearch
+    ) -> None:
+        incomplete = replace(
+            AGENT_RESULT,
+            text="Half an ans",
+            stop_reason=AgentStopReason.MODEL_INCOMPLETE,
+            model_stop_reason="max_tokens",
+        )
+        use_case = AskAssistant(
+            FakeLLMClient(),
+            embeddings,
+            search,
+            max_tokens=256,
+            top_k=5,
+            agent=FakeCatalogAgent(incomplete),
+        )
+
+        result = await use_case.execute(AskCommand(question="Which boot for winter?"))
+
+        assert result.fallback_used is True
+        assert result.stop_reason is AgentStopReason.MODEL_INCOMPLETE
+        assert result.model_stop_reason == "max_tokens"
+        assert result.text.startswith(FALLBACK_WITH_SOURCES)
+        assert result.recommendation is not None

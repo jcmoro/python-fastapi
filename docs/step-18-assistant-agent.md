@@ -145,6 +145,48 @@ código. Estas son las decisiones del usuario:
 **Ajuste de B3:** el comportamiento de `rag` solo cambia en una cosa (RB4). Una respuesta cortada por
 `max_tokens` o una negativa ya no salen como una respuesta normal, sino como el fallback determinista.
 
+### Cómo se implementaron (commit 3)
+
+- **RB1:** el nuevo proveedor `get_mode_catalog_agent` depende de `get_assistant_mode` y solo llama a
+  `get_catalog_agent()` en modo `agent`. En `rag` devuelve `None`. `get_ask_assistant_use_case`
+  depende de él. Por eso los e2e del modo `agent` sobrescriben `get_mode_catalog_agent` en lugar de
+  `get_catalog_agent` y `get_assistant_mode`.
+- **RB2:** el error `AgentUnavailableError(LLMUnavailableError)` lleva `sources`, `recommendation` y
+  `usage`.
+  - Vive en `domain/agent.py`, junto a `AgentResult`. En `domain/exceptions.py` creaba un ciclo de
+    imports: `agent → selection → candidate → exceptions → agent`.
+  - Los nodos `model` y `rag_answer` envuelven el fallo transitorio con el estado de ese momento, y
+    `run()` construye el error con el uso acumulado.
+  - El log es la misma línea `agent_run`, con `stop_reason=unavailable`. Ese valor solo aparece en
+    el log.
+  - `AskAssistant` reutiliza las `sources` del error y solo recupera si vienen vacías, por ejemplo
+    cuando falla el primer turno.
+- **RB3:**
+  - La pregunta se embebe una vez al principio de `run()` y viaja en `ToolContext.question_embedding`.
+  - `find_by_sku` calcula la distancia `<=>` en la misma consulta.
+  - `IndexedProduct` desaparece: el puerto devuelve `RetrievedDocument`.
+- **RB4:**
+  - `INCOMPLETE_STOP_REASONS = {"max_tokens", "refusal"}`, en `domain/completion.py`.
+  - `Completion` y `ModelTurn` exponen el `stop_reason` de la API.
+  - Un turno incompleto no ejecuta sus herramientas.
+  - `AnswerDTO.model_stop_reason` y el campo `model_stop_reason` del log guardan la razón.
+  - El texto OpenAPI de `fallback_used` y el README describen el nuevo caso.
+- **RB5:** el estado del grafo guarda el `model` del último turno. Si ningún turno respondió, se usa
+  el nombre configurado.
+
+Evidencia (rojo → verde):
+
+- **Rojo:** con el código sin modificar fallaban las 17 pruebas RB.
+  - Las de `test_ask_assistant.py`, `test_agent_tools.py` y `test_langgraph_catalog_agent.py`, en la
+    recolección: `ImportError: cannot import name 'AgentUnavailableError'` y
+    `TypeError: ToolContext.__init__() got an unexpected keyword argument 'question_embedding'`.
+  - `test_rb1_rag_mode_never_builds_the_agent`, con `assert 1 == 0` en `currsize`.
+  - Las de los adaptadores: `'ModelTurn' object has no attribute 'stop_reason'`,
+    `'Completion' object has no attribute 'stop_reason'` y
+    `find_by_sku() takes 2 positional arguments but 3 were given`.
+- **Verde:** pasan las 17 pruebas RB, `make lint` (ruff, pylint 10.00/10 y mypy sin incidencias) y
+  `make test` (252 pruebas).
+
 ## Evidencia
 
 _Se completa al terminar._

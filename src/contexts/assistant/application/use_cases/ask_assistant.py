@@ -1,3 +1,5 @@
+from collections.abc import Sequence
+
 from contexts.assistant.application.dtos import (
     AnswerDTO,
     AskCommand,
@@ -5,12 +7,19 @@ from contexts.assistant.application.dtos import (
     SourceDTO,
     UsageDTO,
 )
+from contexts.assistant.domain.agent import (
+    AgentRecommendation,
+    AgentStopReason,
+    AgentUnavailableError,
+)
+from contexts.assistant.domain.completion import INCOMPLETE_STOP_REASONS
 from contexts.assistant.domain.exceptions import LLMUnavailableError
 from contexts.assistant.domain.ports.catalog_agent import CatalogAgent
 from contexts.assistant.domain.ports.document_search import DocumentSearch
 from contexts.assistant.domain.ports.embedding_client import EmbeddingClient
 from contexts.assistant.domain.ports.llm_client import LLMClient
 from contexts.assistant.domain.question import Question
+from contexts.assistant.domain.retrieved_document import RetrievedDocument
 
 SYSTEM_PROMPT = (
     "You are the assistant of a product catalog. "
@@ -60,17 +69,35 @@ class AskAssistant:
             )
         except LLMUnavailableError:
             return AnswerDTO.fallback(_fallback_text(sources), sources)
+        if completion.stop_reason in INCOMPLETE_STOP_REASONS:
+            return AnswerDTO.fallback(
+                _fallback_text(sources), sources, model_stop_reason=completion.stop_reason
+            )
         return AnswerDTO.from_completion(completion, sources)
 
     async def _ask_agent(self, agent: CatalogAgent, question: str) -> AnswerDTO:
         try:
             result = await agent.run(question)
+        except AgentUnavailableError as error:
+            sources = _sources(error.sources) or await self._retrieve(question)
+            return AnswerDTO.fallback(
+                _fallback_text(sources), sources, recommendation=_summary(error.recommendation)
+            )
         except LLMUnavailableError:
             sources = await self._retrieve(question)
             return AnswerDTO.fallback(_fallback_text(sources), sources)
+        if result.stop_reason is AgentStopReason.MODEL_INCOMPLETE:
+            sources = _sources(result.sources) or await self._retrieve(question)
+            return AnswerDTO.fallback(
+                _fallback_text(sources),
+                sources,
+                recommendation=_summary(result.recommendation),
+                stop_reason=result.stop_reason,
+                model_stop_reason=result.model_stop_reason,
+            )
         return AnswerDTO(
             text=result.text,
-            sources=tuple(SourceDTO.from_retrieved(document) for document in result.sources),
+            sources=_sources(result.sources),
             fallback_used=False,
             usage=UsageDTO(
                 model=result.usage.model,
@@ -78,18 +105,13 @@ class AskAssistant:
                 output_tokens=result.usage.output_tokens,
                 latency_ms=result.usage.latency_ms,
             ),
-            recommendation=(
-                RecommendationSummaryDTO.from_agent(result.recommendation)
-                if result.recommendation is not None
-                else None
-            ),
+            recommendation=_summary(result.recommendation),
             stop_reason=result.stop_reason,
         )
 
     async def _retrieve(self, question: str) -> tuple[SourceDTO, ...]:
         [embedding] = await self._embedding_client.embed([question])
-        documents = await self._document_search.search(embedding, self._top_k)
-        return tuple(SourceDTO.from_retrieved(document) for document in documents)
+        return _sources(await self._document_search.search(embedding, self._top_k))
 
 
 def build_rag_prompt(question: str, sources: tuple[SourceDTO, ...]) -> str:
@@ -97,6 +119,16 @@ def build_rag_prompt(question: str, sources: tuple[SourceDTO, ...]) -> str:
         return question
     products = "\n\n".join(source.content for source in sources)
     return f"Catalog products:\n\n{products}\n\nQuestion: {question}"
+
+
+def _sources(documents: Sequence[RetrievedDocument]) -> tuple[SourceDTO, ...]:
+    return tuple(SourceDTO.from_retrieved(document) for document in documents)
+
+
+def _summary(recommendation: AgentRecommendation | None) -> RecommendationSummaryDTO | None:
+    if recommendation is None:
+        return None
+    return RecommendationSummaryDTO.from_agent(recommendation)
 
 
 def _fallback_text(sources: tuple[SourceDTO, ...]) -> str:

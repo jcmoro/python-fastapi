@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from uuid import UUID
 
+from contexts.assistant.domain.exceptions import LLMUnavailableError
 from contexts.assistant.domain.retrieved_document import RetrievedDocument
 from contexts.assistant.domain.selection import SelectionReason
 
@@ -9,6 +10,7 @@ from contexts.assistant.domain.selection import SelectionReason
 class AgentStopReason(str, Enum):
     ANSWERED = "answered"
     MAX_STEPS = "max_steps"
+    MODEL_INCOMPLETE = "model_incomplete"
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,3 +37,18 @@ class AgentResult:
     recommendation: AgentRecommendation | None
     stop_reason: AgentStopReason
     usage: AgentUsage
+    model_stop_reason: str | None = None
+
+
+class AgentUnavailableError(LLMUnavailableError):
+    def __init__(
+        self,
+        *,
+        sources: tuple[RetrievedDocument, ...],
+        recommendation: AgentRecommendation | None,
+        usage: AgentUsage,
+    ) -> None:
+        super().__init__("the language model is unavailable")
+        self.sources = sources
+        self.recommendation = recommendation
+        self.usage = usage

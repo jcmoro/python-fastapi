@@ -6,7 +6,7 @@ from tests.fakes.embedding_client import FakeEmbeddingClient
 
 from contexts.assistant.application.use_cases.recommend_candidate import RecommendCandidate
 from contexts.assistant.domain.candidate import RubricAnswers
-from contexts.assistant.domain.retrieved_document import IndexedProduct, RetrievedDocument
+from contexts.assistant.domain.retrieved_document import RetrievedDocument
 from contexts.assistant.domain.selection import SelectionReason
 from contexts.assistant.infrastructure.agent.tools import (
     ToolContext,
@@ -37,25 +37,15 @@ BOOT = _doc("BOOT-1", "Winter boot", 12900, 0.9)
 SANDAL = _doc("SAND-1", "Summer sandal", 3900, 0.4)
 
 
-def _tools(assessor: FakeCandidateAssessor) -> list[ToolSpec]:
-    search = FakeDocumentSearch(
-        [BOOT, SANDAL],
-        products=[
-            IndexedProduct(
-                product_id=BOOT.product_id,
-                sku="BOOT-1",
-                name="Winter boot",
-                price_cents=12900,
-                currency="EUR",
-                content=BOOT.content,
-            )
-        ],
-    )
+def _tools(
+    assessor: FakeCandidateAssessor, embeddings: FakeEmbeddingClient | None = None
+) -> list[ToolSpec]:
+    search = FakeDocumentSearch([BOOT, SANDAL], products=[BOOT])
     recommend = RecommendCandidate(
         assessor, top_n=10, timeout_s=5.0, requirements_threshold=0.5, min_score=0.5
     )
     return build_tools(
-        embedding_client=FakeEmbeddingClient(),
+        embedding_client=embeddings or FakeEmbeddingClient(),
         document_search=search,
         recommend_candidate=recommend,
         rag_top_k=5,
@@ -63,7 +53,7 @@ def _tools(assessor: FakeCandidateAssessor) -> list[ToolSpec]:
     )
 
 
-CONTEXT = ToolContext(question=QUESTION)
+CONTEXT = ToolContext(question=QUESTION, question_embedding=[0.0, 1.0, 0.0])
 
 
 class TestSingleDefinition:
@@ -106,6 +96,25 @@ class TestHandlers:
 
         assert "Winter boot" in outcome.text
         assert outcome.is_error is False
+
+    async def test_rb3_get_product_by_sku_adds_the_product_with_its_real_score(self) -> None:
+        outcome = await dispatch(
+            _tools(FakeCandidateAssessor()), "get_product_by_sku", {"sku": "BOOT-1"}, CONTEXT
+        )
+
+        assert [(d.sku, d.score) for d in outcome.retrieved] == [("BOOT-1", BOOT.score)]
+
+    async def test_rb3_recommend_candidate_reuses_the_question_embedding(self) -> None:
+        embeddings = FakeEmbeddingClient()
+
+        await dispatch(
+            _tools(FakeCandidateAssessor(default=YES), embeddings),
+            "recommend_candidate",
+            {},
+            CONTEXT,
+        )
+
+        assert embeddings.calls == []
 
     async def test_get_product_by_sku_reports_an_unknown_sku(self) -> None:
         outcome = await dispatch(

@@ -40,7 +40,7 @@ Most GenAI demos wire the SDK straight into the route handler. This one treats t
 - **Retrieval is a port too.** `EmbeddingClient` and `DocumentSearch` are ports; embeddings run locally with a multilingual model (no API key, no cost) and vectors live in the existing Postgres with `pgvector`.
 - **Indexing is explicit and incremental.** `make reindex` re-embeds only products whose content or embedding model changed (a `content_hash` per document), in batches, and deletes documents only after confirming their product no longer exists. `catalog` doesn't know the assistant exists.
 - **Tests never call a real model.** Unit and e2e tests use fakes at the port boundary (`FakeLLMClient`, `FakeEmbeddingClient`, `FakeDocumentSearch`). The real LLM adapter is tested against a mocked HTTP transport, and the vector adapters against a real pgvector database.
-- **Failures have a contract.** If the LLM is unavailable (connection, timeout, 429, 5xx), the answer still comes back — **200** with the retrieved products and `fallback_used: true`. Configuration errors (bad key, unknown model) are not disguised as outages.
+- **Failures have a contract.** If the LLM is unavailable (connection, timeout, 429, 5xx), or its answer is cut off by the token limit or refused, the answer still comes back — **200** with the retrieved products and `fallback_used: true`. Configuration errors (bad key, unknown model) are not disguised as outages.
 - **Latency is bounded.** `LLM_TIMEOUT_S` applies per attempt and `LLM_MAX_RETRIES` defaults to 0, so the worst case is `timeout * (retries + 1)`.
 - **Every answer reports its cost.** Responses include the model used, input/output tokens and latency.
 
@@ -82,7 +82,7 @@ Example response (values are illustrative):
 
 | Status | When |
 |--------|------|
-| `200`  | The model answered from the retrieved products. Also when the LLM is unavailable (connection, timeout, 429, 5xx): then `fallback_used` is `true`, `usage` is `null` and the text lists the retrieved products. |
+| `200`  | The model answered from the retrieved products. Also when the LLM is unavailable (connection, timeout, 429, 5xx) or its answer is cut off by the token limit or refused: then `fallback_used` is `true`, `usage` is `null` and the text lists the retrieved products. |
 | `422`  | Empty or blank question, more than 1,000 characters, or unknown fields. |
 | `500`  | Misconfiguration: missing or invalid API key, unknown model, invalid request. |
 

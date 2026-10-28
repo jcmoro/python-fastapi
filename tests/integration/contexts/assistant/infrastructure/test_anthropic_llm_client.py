@@ -80,3 +80,26 @@ class TestTimeoutBound:
             await _complete(adapter)
 
         assert len(attempts) == 1
+
+
+class TestStopReason:
+    @pytest.mark.parametrize("stop_reason", ["end_turn", "max_tokens", "refusal"])
+    async def test_rb4_reports_the_model_stop_reason(self, stop_reason: str) -> None:
+        def handler(_request: httpx2.Request) -> httpx2.Response:
+            return httpx2.Response(
+                200,
+                json={
+                    "id": "msg_test",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": "claude-test",
+                    "content": [{"type": "text", "text": "Answer"}],
+                    "stop_reason": stop_reason,
+                    "stop_sequence": None,
+                    "usage": {"input_tokens": 5, "output_tokens": 5},
+                },
+            )
+
+        completion = await _adapter(handler).complete(system="s", prompt="p", max_tokens=16)
+
+        assert completion.stop_reason == stop_reason

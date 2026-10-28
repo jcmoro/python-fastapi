@@ -11,13 +11,3 @@ class RetrievedDocument:
     name: str | None = None
     price_cents: int | None = None
     currency: str | None = None
-
-
-@dataclass(frozen=True, slots=True)
-class IndexedProduct:
-    product_id: UUID
-    sku: str
-    name: str
-    price_cents: int
-    currency: str
-    content: str

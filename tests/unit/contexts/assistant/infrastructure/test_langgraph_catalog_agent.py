@@ -10,7 +10,7 @@ from tests.fakes.documents import FakeDocumentSearch
 from tests.fakes.embedding_client import FakeEmbeddingClient
 
 from contexts.assistant.application.use_cases.recommend_candidate import RecommendCandidate
-from contexts.assistant.domain.agent import AgentStopReason
+from contexts.assistant.domain.agent import AgentStopReason, AgentUnavailableError
 from contexts.assistant.domain.candidate import RubricAnswers
 from contexts.assistant.domain.exceptions import LLMUnavailableError
 from contexts.assistant.domain.retrieved_document import RetrievedDocument
@@ -42,7 +42,9 @@ SANDAL = RetrievedDocument(
 )
 
 
-def _turn(*calls: ToolCall, text: str = "") -> ModelTurn:
+def _turn(
+    *calls: ToolCall, text: str = "", stop_reason: str = "", model: str = "claude-test"
+) -> ModelTurn:
     content: list[dict[str, object]] = [{"type": "thinking", "thinking": "", "signature": "s"}]
     if text:
         content.append({"type": "text", "text": text})
@@ -53,9 +55,10 @@ def _turn(*calls: ToolCall, text: str = "") -> ModelTurn:
         assistant_content=content,
         text=text,
         tool_calls=calls,
-        model="claude-test",
+        model=model,
         input_tokens=10,
         output_tokens=5,
+        stop_reason=stop_reason or ("tool_use" if calls else "end_turn"),
     )
 
 
@@ -86,7 +89,12 @@ def _search_call(n: int) -> ToolCall:
     return ToolCall(id=f"toolu_{n}", name="semantic_search", input={"query": f"boots {n}"})
 
 
-def _agent(model: ScriptedModel, max_tool_calls: int = 5) -> LangGraphCatalogAgent:
+def _agent(
+    model: ScriptedModel,
+    max_tool_calls: int = 5,
+    embeddings: FakeEmbeddingClient | None = None,
+) -> LangGraphCatalogAgent:
+    embedding_client = embeddings or FakeEmbeddingClient()
     assessor = FakeCandidateAssessor(
         outcomes={
             BOOT.product_id: RubricAnswers(meets_requirements=1, suitable_for_use=1),
@@ -94,15 +102,20 @@ def _agent(model: ScriptedModel, max_tool_calls: int = 5) -> LangGraphCatalogAge
         }
     )
     tools = build_tools(
-        embedding_client=FakeEmbeddingClient(),
-        document_search=FakeDocumentSearch([BOOT, SANDAL]),
+        embedding_client=embedding_client,
+        document_search=FakeDocumentSearch([BOOT, SANDAL], products=[BOOT]),
         recommend_candidate=RecommendCandidate(
             assessor, top_n=10, timeout_s=5, requirements_threshold=0.5, min_score=0.5
         ),
         rag_top_k=5,
         selector_top_n=10,
     )
-    return LangGraphCatalogAgent(model=model, tools=tools, max_tool_calls=max_tool_calls)
+    return LangGraphCatalogAgent(
+        model=model,
+        tools=tools,
+        embedding_client=embedding_client,
+        max_tool_calls=max_tool_calls,
+    )
 
 
 class TestStepLimit:
@@ -190,3 +203,79 @@ class TestErrors:
 
         with pytest.raises(LLMUnavailableError):
             await _agent(Failing([])).run(QUESTION)
+
+
+class TestReviewFixes:
+    async def test_rb2_a_model_failure_after_selection_carries_the_partial_state(self) -> None:
+        class FailsOnSecondTurn(ScriptedModel):
+            async def respond(
+                self,
+                *,
+                system: str,
+                messages: Sequence[MessageParam],
+                tools: Sequence[ToolParam] | None,
+            ) -> ModelTurn:
+                if self.calls:
+                    raise LLMUnavailableError("529")
+                self.calls.append((list(messages), bool(tools)))
+                return _turn(ToolCall(id="toolu_1", name="recommend_candidate", input={}))
+
+        with pytest.raises(AgentUnavailableError) as raised:
+            await _agent(FailsOnSecondTurn([])).run(QUESTION)
+
+        partial = raised.value
+        assert partial.recommendation is not None
+        assert partial.recommendation.sku == "BOOT-1"
+        assert BOOT.product_id in {document.product_id for document in partial.sources}
+        assert (partial.usage.input_tokens, partial.usage.tool_calls) == (10, 1)
+
+    async def test_rb3_the_question_is_embedded_once_per_run(self) -> None:
+        embeddings = FakeEmbeddingClient()
+        model = ScriptedModel(
+            [
+                _turn(
+                    ToolCall(id="toolu_1", name="recommend_candidate", input={}),
+                    ToolCall(id="toolu_2", name="get_product_by_sku", input={"sku": "BOOT-1"}),
+                ),
+                _turn(text="done"),
+            ]
+        )
+
+        await _agent(model, embeddings=embeddings).run(QUESTION)
+
+        assert embeddings.calls == [[QUESTION]]
+
+    async def test_rb4_an_incomplete_turn_stops_without_running_its_tools(self) -> None:
+        model = ScriptedModel([_turn(_search_call(1), stop_reason="max_tokens")])
+
+        result = await _agent(model).run(QUESTION)
+
+        assert result.stop_reason is AgentStopReason.MODEL_INCOMPLETE
+        assert result.model_stop_reason == "max_tokens"
+        assert result.usage.tool_calls == 0
+
+    async def test_rb4_a_refused_rag_answer_is_model_incomplete(self) -> None:
+        class RefusesRag(ScriptedModel):
+            async def respond(
+                self,
+                *,
+                system: str,
+                messages: Sequence[MessageParam],
+                tools: Sequence[ToolParam] | None,
+            ) -> ModelTurn:
+                self.calls.append((list(messages), bool(tools)))
+                if not tools:
+                    return _turn(text="", stop_reason="refusal")
+                return _turn(_search_call(len(self.calls)))
+
+        result = await _agent(RefusesRag([]), max_tool_calls=1).run(QUESTION)
+
+        assert result.stop_reason is AgentStopReason.MODEL_INCOMPLETE
+        assert result.model_stop_reason == "refusal"
+
+    async def test_rb5_usage_model_is_the_model_the_api_returned(self) -> None:
+        model = ScriptedModel([_turn(text="done", model="claude-test-20261001")])
+
+        result = await _agent(model).run(QUESTION)
+
+        assert result.usage.model == "claude-test-20261001"

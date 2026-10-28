@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 
-from contexts.assistant.domain.retrieved_document import IndexedProduct, RetrievedDocument
+from contexts.assistant.domain.retrieved_document import RetrievedDocument
 
 
 class DocumentSearch(ABC):
@@ -11,5 +11,7 @@ class DocumentSearch(ABC):
         """
 
     @abstractmethod
-    async def find_by_sku(self, sku: str) -> IndexedProduct | None:
-        """Exact SKU match. ``None`` if the SKU is not indexed or its catalog fields are missing."""
+    async def find_by_sku(self, sku: str, embedding: list[float]) -> RetrievedDocument | None:
+        """Exact SKU match. ``score`` is the cosine similarity to ``embedding``, as in ``search``.
+        ``None`` if the SKU is not indexed or its catalog fields are missing.
+        """

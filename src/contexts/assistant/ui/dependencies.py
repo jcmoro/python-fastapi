@@ -131,7 +131,10 @@ def get_catalog_agent() -> CatalogAgent:
         selector_top_n=settings.selector_top_n,
     )
     return LangGraphCatalogAgent(
-        model=model, tools=tools, max_tool_calls=settings.agent_max_tool_calls
+        model=model,
+        tools=tools,
+        embedding_client=get_embedding_client(),
+        max_tool_calls=settings.agent_max_tool_calls,
     )
 
 
@@ -139,12 +142,17 @@ def get_assistant_mode() -> str:
     return get_settings().assistant_mode
 
 
+def get_mode_catalog_agent(
+    mode: Annotated[str, Depends(get_assistant_mode)],
+) -> CatalogAgent | None:
+    return get_catalog_agent() if mode == "agent" else None
+
+
 def get_ask_assistant_use_case(
     llm_client: Annotated[LLMClient, Depends(get_llm_client)],
     embedding_client: Annotated[EmbeddingClient, Depends(get_embedding_client)],
     document_search: Annotated[DocumentSearch, Depends(get_document_search)],
-    mode: Annotated[str, Depends(get_assistant_mode)],
-    agent: Annotated[CatalogAgent, Depends(get_catalog_agent)],
+    agent: Annotated[CatalogAgent | None, Depends(get_mode_catalog_agent)],
 ) -> AskAssistant:
     settings = get_settings()
     return AskAssistant(
@@ -153,7 +161,7 @@ def get_ask_assistant_use_case(
         document_search,
         max_tokens=settings.llm_max_tokens,
         top_k=settings.rag_top_k,
-        agent=agent if mode == "agent" else None,
+        agent=agent,
     )
 
 

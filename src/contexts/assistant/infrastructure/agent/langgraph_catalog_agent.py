@@ -13,9 +13,13 @@ from contexts.assistant.domain.agent import (
     AgentRecommendation,
     AgentResult,
     AgentStopReason,
+    AgentUnavailableError,
     AgentUsage,
 )
+from contexts.assistant.domain.completion import INCOMPLETE_STOP_REASONS
+from contexts.assistant.domain.exceptions import LLMUnavailableError
 from contexts.assistant.domain.ports.catalog_agent import CatalogAgent
+from contexts.assistant.domain.ports.embedding_client import EmbeddingClient
 from contexts.assistant.domain.retrieved_document import RetrievedDocument
 from contexts.assistant.infrastructure.agent.anthropic_agent_model import ModelTurn, ToolCall
 from contexts.assistant.infrastructure.agent.tools import (
@@ -54,6 +58,7 @@ class AgentModel(Protocol):
 
 class _State(TypedDict):
     question: str
+    question_embedding: list[float]
     messages: list[MessageParam]
     pending: list[ToolCall]
     tool_calls: int
@@ -61,24 +66,40 @@ class _State(TypedDict):
     recommendation: AgentRecommendation | None
     text: str
     stop_reason: AgentStopReason | None
+    model_stop_reason: str | None
+    model: str
     input_tokens: int
     output_tokens: int
 
 
+class _ModelFailedError(Exception):
+    def __init__(self, state: _State) -> None:
+        super().__init__("the language model is unavailable")
+        self.state = state
+
+
 class LangGraphCatalogAgent(CatalogAgent):
     def __init__(
-        self, *, model: AgentModel, tools: Sequence[ToolSpec], max_tool_calls: int
+        self,
+        *,
+        model: AgentModel,
+        tools: Sequence[ToolSpec],
+        embedding_client: EmbeddingClient,
+        max_tool_calls: int,
     ) -> None:
         self._model = model
         self._tools = list(tools)
+        self._embedding_client = embedding_client
         self._definitions = api_tool_definitions(self._tools)
         self._max_tool_calls = max_tool_calls
         self._graph = self._build()
 
     async def run(self, question: str) -> AgentResult:
         started = time.perf_counter()
+        [embedding] = await self._embedding_client.embed([question])
         initial: _State = {
             "question": question,
+            "question_embedding": embedding,
             "messages": [{"role": "user", "content": question}],
             "pending": [],
             "tool_calls": 0,
@@ -86,26 +107,50 @@ class LangGraphCatalogAgent(CatalogAgent):
             "recommendation": None,
             "text": "",
             "stop_reason": None,
+            "model_stop_reason": None,
+            "model": self._model.model_name,
             "input_tokens": 0,
             "output_tokens": 0,
         }
-        final = await self._graph.ainvoke(
-            initial, config={"recursion_limit": 2 * self._max_tool_calls + 6}
-        )
+        try:
+            final = await self._graph.ainvoke(
+                initial, config={"recursion_limit": 2 * self._max_tool_calls + 6}
+            )
+        except _ModelFailedError as failure:
+            partial = failure.state
+            error = AgentUnavailableError(
+                sources=tuple(partial["retrieved"]),
+                recommendation=partial["recommendation"],
+                usage=_usage(
+                    model=partial["model"],
+                    tool_calls=partial["tool_calls"],
+                    input_tokens=partial["input_tokens"],
+                    output_tokens=partial["output_tokens"],
+                    started=started,
+                ),
+            )
+            _log("unavailable", None, error.usage, error.recommendation)
+            raise error from failure.__cause__
         result = AgentResult(
             text=final["text"],
             sources=tuple(final["retrieved"]),
             recommendation=final["recommendation"],
             stop_reason=final["stop_reason"],
-            usage=AgentUsage(
-                model=self._model.model_name,
+            usage=_usage(
+                model=final["model"],
                 tool_calls=final["tool_calls"],
                 input_tokens=final["input_tokens"],
                 output_tokens=final["output_tokens"],
-                latency_ms=round((time.perf_counter() - started) * 1000),
+                started=started,
             ),
+            model_stop_reason=final["model_stop_reason"],
         )
-        self._log(result)
+        _log(
+            result.stop_reason.value,
+            result.model_stop_reason,
+            result.usage,
+            result.recommendation,
+        )
         return result
 
     def _build(self) -> CompiledStateGraph[_State, None, _State, _State]:
@@ -128,24 +173,45 @@ class LangGraphCatalogAgent(CatalogAgent):
             return ROUTE_RAG
         return ROUTE_TOOLS
 
+    async def _respond(
+        self,
+        state: _State,
+        *,
+        system: str,
+        messages: Sequence[MessageParam],
+        tools: Sequence[ToolParam] | None,
+    ) -> ModelTurn:
+        try:
+            return await self._model.respond(system=system, messages=messages, tools=tools)
+        except LLMUnavailableError as error:
+            raise _ModelFailedError(state) from error
+
     async def _model_node(self, state: _State) -> dict[str, object]:
-        turn = await self._model.respond(
-            system=AGENT_SYSTEM_PROMPT, messages=state["messages"], tools=self._definitions
+        turn = await self._respond(
+            state, system=AGENT_SYSTEM_PROMPT, messages=state["messages"], tools=self._definitions
         )
+        incomplete = turn.stop_reason in INCOMPLETE_STOP_REASONS
         assistant: MessageParam = {"role": "assistant", "content": turn.assistant_content}
         update: dict[str, object] = {
             "messages": [*state["messages"], assistant],
-            "pending": list(turn.tool_calls),
+            "pending": [] if incomplete else list(turn.tool_calls),
+            "model": turn.model,
             "input_tokens": state["input_tokens"] + turn.input_tokens,
             "output_tokens": state["output_tokens"] + turn.output_tokens,
         }
-        if not turn.tool_calls:
+        if incomplete:
+            update["text"] = turn.text
+            update["stop_reason"] = AgentStopReason.MODEL_INCOMPLETE
+            update["model_stop_reason"] = turn.stop_reason
+        elif not turn.tool_calls:
             update["text"] = turn.text
             update["stop_reason"] = AgentStopReason.ANSWERED
         return update
 
     async def _tools_node(self, state: _State) -> dict[str, object]:
-        context = ToolContext(question=state["question"])
+        context = ToolContext(
+            question=state["question"], question_embedding=state["question_embedding"]
+        )
         retrieved = list(state["retrieved"])
         recommendation = state["recommendation"]
         results: list[ToolResultBlockParam] = []
@@ -174,30 +240,54 @@ class LangGraphCatalogAgent(CatalogAgent):
 
     async def _rag_node(self, state: _State) -> dict[str, object]:
         sources = tuple(SourceDTO.from_retrieved(document) for document in state["retrieved"])
-        turn = await self._model.respond(
+        turn = await self._respond(
+            state,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": build_rag_prompt(state["question"], sources)}],
             tools=None,
         )
+        incomplete = turn.stop_reason in INCOMPLETE_STOP_REASONS
         return {
             "text": turn.text,
-            "stop_reason": AgentStopReason.MAX_STEPS,
+            "stop_reason": (
+                AgentStopReason.MODEL_INCOMPLETE if incomplete else AgentStopReason.MAX_STEPS
+            ),
+            "model_stop_reason": turn.stop_reason if incomplete else None,
             "pending": [],
+            "model": turn.model,
             "input_tokens": state["input_tokens"] + turn.input_tokens,
             "output_tokens": state["output_tokens"] + turn.output_tokens,
         }
 
-    def _log(self, result: AgentResult) -> None:
-        recommendation = result.recommendation
-        logger.info(
-            "agent_run stop_reason=%s tool_calls=%d model=%s input_tokens=%d output_tokens=%d "
-            "latency_ms=%d recommendation_reason=%s product_id=%s",
-            result.stop_reason.value,
-            result.usage.tool_calls,
-            result.usage.model,
-            result.usage.input_tokens,
-            result.usage.output_tokens,
-            result.usage.latency_ms,
-            recommendation.reason.value if recommendation is not None else None,
-            recommendation.product_id if recommendation is not None else None,
-        )
+
+def _usage(
+    *, model: str, tool_calls: int, input_tokens: int, output_tokens: int, started: float
+) -> AgentUsage:
+    return AgentUsage(
+        model=model,
+        tool_calls=tool_calls,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        latency_ms=round((time.perf_counter() - started) * 1000),
+    )
+
+
+def _log(
+    stop_reason: str,
+    model_stop_reason: str | None,
+    usage: AgentUsage,
+    recommendation: AgentRecommendation | None,
+) -> None:
+    logger.info(
+        "agent_run stop_reason=%s model_stop_reason=%s tool_calls=%d model=%s input_tokens=%d "
+        "output_tokens=%d latency_ms=%d recommendation_reason=%s product_id=%s",
+        stop_reason,
+        model_stop_reason,
+        usage.tool_calls,
+        usage.model,
+        usage.input_tokens,
+        usage.output_tokens,
+        usage.latency_ms,
+        recommendation.reason.value if recommendation is not None else None,
+        recommendation.product_id if recommendation is not None else None,
+    )

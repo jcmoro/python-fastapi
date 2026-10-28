@@ -59,6 +59,7 @@ class AnswerDTO:
     usage: UsageDTO | None
     recommendation: RecommendationSummaryDTO | None = None
     stop_reason: AgentStopReason | None = None
+    model_stop_reason: str | None = None
 
     @classmethod
     def from_completion(cls, completion: Completion, sources: tuple[SourceDTO, ...]) -> AnswerDTO:
@@ -75,8 +76,24 @@ class AnswerDTO:
         )
 
     @classmethod
-    def fallback(cls, text: str, sources: tuple[SourceDTO, ...]) -> AnswerDTO:
-        return cls(text=text, sources=sources, fallback_used=True, usage=None)
+    def fallback(
+        cls,
+        text: str,
+        sources: tuple[SourceDTO, ...],
+        *,
+        recommendation: RecommendationSummaryDTO | None = None,
+        stop_reason: AgentStopReason | None = None,
+        model_stop_reason: str | None = None,
+    ) -> AnswerDTO:
+        return cls(
+            text=text,
+            sources=sources,
+            fallback_used=True,
+            usage=None,
+            recommendation=recommendation,
+            stop_reason=stop_reason,
+            model_stop_reason=model_stop_reason,
+        )
 
 
 @dataclass(frozen=True, slots=True)

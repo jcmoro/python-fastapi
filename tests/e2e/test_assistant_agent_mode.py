@@ -18,11 +18,10 @@ from contexts.assistant.domain.agent import (
 from contexts.assistant.domain.retrieved_document import RetrievedDocument
 from contexts.assistant.domain.selection import SelectionReason
 from contexts.assistant.ui.dependencies import (
-    get_assistant_mode,
-    get_catalog_agent,
     get_document_search,
     get_embedding_client,
     get_llm_client,
+    get_mode_catalog_agent,
 )
 
 BOOT = RetrievedDocument(
@@ -52,8 +51,7 @@ async def agent_client() -> AsyncIterator[ClientFactory]:
     def _factory(agent: FakeCatalogAgent) -> AsyncClient:
         application = create_app()
         llm, embeddings, search = FakeLLMClient(), FakeEmbeddingClient(), FakeDocumentSearch()
-        application.dependency_overrides[get_assistant_mode] = lambda: "agent"
-        application.dependency_overrides[get_catalog_agent] = lambda: agent
+        application.dependency_overrides[get_mode_catalog_agent] = lambda: agent
         application.dependency_overrides[get_llm_client] = lambda: llm
         application.dependency_overrides[get_embedding_client] = lambda: embeddings
         application.dependency_overrides[get_document_search] = lambda: search

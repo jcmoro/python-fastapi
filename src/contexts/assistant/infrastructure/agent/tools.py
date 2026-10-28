@@ -16,6 +16,7 @@ from contexts.assistant.domain.selection import SelectionReason
 @dataclass(frozen=True, slots=True)
 class ToolContext:
     question: str
+    question_embedding: list[float]
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,18 +72,19 @@ def build_tools(
             return ToolOutcome(text="No catalog products match.")
         return ToolOutcome(text="\n".join(_line(hit) for hit in hits), retrieved=tuple(hits))
 
-    async def get_product_by_sku(tool_input: Mapping[str, object], _: ToolContext) -> ToolOutcome:
+    async def get_product_by_sku(
+        tool_input: Mapping[str, object], context: ToolContext
+    ) -> ToolOutcome:
         sku = tool_input.get("sku")
         if not isinstance(sku, str) or not sku.strip():
             return ToolOutcome(text="get_product_by_sku needs a non-empty 'sku'", is_error=True)
-        product = await document_search.find_by_sku(sku.strip())
+        product = await document_search.find_by_sku(sku.strip(), context.question_embedding)
         if product is None:
             return ToolOutcome(text=f"No catalog product has SKU {sku.strip()}.")
-        return ToolOutcome(text=product.content)
+        return ToolOutcome(text=product.content, retrieved=(product,))
 
     async def recommend(_: Mapping[str, object], context: ToolContext) -> ToolOutcome:
-        [embedding] = await embedding_client.embed([context.question])
-        hits = await document_search.search(embedding, selector_top_n)
+        hits = await document_search.search(context.question_embedding, selector_top_n)
         candidates = [candidate for hit in hits if (candidate := _candidate(hit)) is not None]
         result = await recommend_candidate.execute(context.question, candidates)
         recommendation = AgentRecommendation(

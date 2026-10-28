@@ -89,11 +89,11 @@ class AnswerResponse(BaseModel):
     )
     fallback_used: bool = Field(
         ...,
-        description="True when the LLM was unavailable and the answer lists the retrieved "
-        "products without generation.",
+        description="True when the LLM was unavailable, or its answer was cut off by the token "
+        "limit or refused, and the answer lists the retrieved products without generation.",
     )
     usage: UsageResponse | None = Field(
-        ..., description="LLM usage. Null when the fallback was used (no LLM call succeeded)."
+        ..., description="LLM usage. Null when the fallback was used."
     )
     recommendation: RecommendationResponse | None = Field(
         default=None,

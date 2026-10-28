@@ -104,12 +104,20 @@ class TestTurns:
             "signature": "sig-1",
         }
         assert (turn.input_tokens, turn.output_tokens, turn.model) == (30, 12, "claude-test")
+        assert turn.stop_reason == "tool_use"
 
     async def test_final_turn_returns_the_text(self) -> None:
         turn = await _respond(_model(Recording(_response([{"type": "text", "text": "Done."}]))))
 
         assert turn.tool_calls == ()
         assert turn.text == "Done."
+
+    async def test_rb4_reports_a_cut_off_turn(self) -> None:
+        turn = await _respond(
+            _model(Recording(_response([{"type": "text", "text": "Half"}], "max_tokens")))
+        )
+
+        assert turn.stop_reason == "max_tokens"
 
     async def test_sends_the_tools_and_no_sampling_parameters(self) -> None:
         handler = Recording(_response([{"type": "text", "text": "ok"}]))
