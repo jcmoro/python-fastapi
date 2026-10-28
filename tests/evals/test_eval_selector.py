@@ -10,8 +10,8 @@ from tests.evals.harness import (
     RecordingAssessor,
     SelectorRun,
     Tokens,
-    accuracy_line,
     assessment_tokens,
+    baseline_lines,
     candidate_of,
     latency_line,
     outcome_of,
@@ -105,14 +105,13 @@ async def _run_selector(
 def _print(title: str, report: SelectorReport, baseline: SelectorReport | None = None) -> None:
     runs = report.runs
     print(f"\n{title}")
-    print(f"  result {accuracy_line([r.question for r in runs], [r.outcome for r in runs])}")
+    for line in baseline_lines(runs):
+        print(f"  {line}")
     if baseline is not None:
         same = sum(
             run.outcome == base.outcome for run, base in zip(runs, baseline.runs, strict=True)
         )
         print(f"  same outcome as E1: {same}/{len(runs)}")
-    reachable = sum(run.reachable for run in runs)
-    print(f"  retrieval ceiling: an acceptable outcome is reachable in {reachable}/{len(runs)}")
     for run in runs:
         verdict = "ok" if run.correct else "WRONG"
         print(

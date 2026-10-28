@@ -148,6 +148,22 @@ cubre ambas preguntas con 300 llamadas y deja el total en unas **930**.
   top 10 de la recuperación en q06 (`MT-0020`) ni en q10 (`MT-0017`). En q09 faltan 2 de sus 4.
   Por eso E1–E3 llegan como mucho a 8/10, y el informe lo muestra en la columna `reachable`.
 
+### Línea base (decisión del usuario)
+
+- **Modelo de embeddings:** E1–E3 se ejecutan con el modelo actual,
+  `paraphrase-multilingual-MiniLM-L12-v2`. Es multilingüe; se comprobó en la configuración, en el
+  Dockerfile y en el catálogo de fastembed.
+- **Dataset:** no cambia.
+- **Informe:** da dos números.
+  - **Extremo a extremo:** aciertos sobre 10, junto al techo de recuperación (8/10: en q06 y q10
+    no hay ningún SKU aceptable entre los candidatos).
+  - **Solo selector:** aciertos contando únicamente las preguntas que tienen un SKU aceptable entre
+    los candidatos.
+- **Cambio de modelo:** queda como PR 4b del plan, y se decidirá con estos datos.
+- **Ejecución pendiente:** el primer intento se paró en la primera tanda de peticiones: la API
+  respondió 400 por falta de crédito. Ninguna de esas peticiones se facturó. Se repite cuando haya
+  crédito.
+
 ## Correcciones tras la code review (3b)
 
 La revisión (`/code-review`, lanzada por el usuario) dio 10 hallazgos y se comprobó cada uno contra el

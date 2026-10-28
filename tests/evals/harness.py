@@ -169,6 +169,20 @@ class SelectorRun:
         )
 
 
+def baseline_lines(runs: Sequence[SelectorRun]) -> tuple[str, str]:
+    reachable = [run for run in runs if run.reachable]
+    unreachable = [run.question.id for run in runs if not run.reachable]
+    ceiling = f"retrieval ceiling {len(reachable)}/{len(runs)}"
+    if unreachable:
+        ceiling += f" ({', '.join(unreachable)}: no acceptable SKU among the candidates)"
+    end_to_end = accuracy_line([r.question for r in runs], [r.outcome for r in runs])
+    selector_only = accuracy_line([r.question for r in reachable], [r.outcome for r in reachable])
+    return (
+        f"end-to-end {end_to_end}; {ceiling}",
+        f"selector only {selector_only} (questions with an acceptable SKU among the candidates)",
+    )
+
+
 def threshold_table(runs: Sequence[SelectorRun]) -> list[ThresholdRow]:
     rows = []
     for requirements_threshold, min_score in grid(THRESHOLD_GRID, THRESHOLD_GRID):

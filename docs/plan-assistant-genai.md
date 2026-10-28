@@ -399,6 +399,40 @@ se informa del número de llamadas y del modelo**, y se espera.
 
 ---
 
+## PR 4b — Modelo de embeddings (se decide con datos)
+
+PR aparte, después del PR 4. **Qué:** decidir si se cambia el modelo de embeddings actual,
+`paraphrase-multilingual-MiniLM-L12-v2`. Ya es multilingüe, así que el motivo no es el idioma.
+**Por qué:** con ese modelo, el SKU aceptable de q06 y q10 queda fuera del top 10 de la recuperación.
+Eso pone un techo de 8/10 a E1–E3, por mucho que acierte el selector. La causa es que los nombres
+comerciales confunden («Bota **Glaciar**», «Tienda **Refugio**») y que la respuesta exige una
+inferencia: pasar de «no resbalar en hielo» a crampones, y de «cargar a la espalda» a mochila.
+
+Comprobación gratuita en memoria (sin llamadas a Claude y con el dataset sin cambios). Posiciones
+del SKU aceptable:
+
+| Modelo | Dims | Preguntas con un SKU aceptable en el top 10 | q05 | q06 | q10 | Migración |
+|---|---|---|---|---|---|---|
+| MiniLM-L12 (actual) | 384 | 8/10 | 7 | 11 | 16 | — |
+| multilingual-e5-small | 384 | 9/10 | 15 | 7 | 3 | no |
+| multilingual-e5-base | 768 | 8/10 | 16 | 15 | 4 | sí |
+| multilingual-e5-large | 1024 | 10/10 | 10 (justo) | 4 | 2 | sí |
+
+- **e5-small y e5-base:** no están en la lista de fastembed 0.9.1. Se cargan con
+  `add_custom_model`, a partir del ONNX oficial de Hugging Face y con pooling *mean*.
+- **Las tres e5:** usan los prefijos `query:` y `passage:`.
+- **e5-large:** pesa 2,24 GB frente a 0,22 GB; la imagen crece en consecuencia.
+
+**Cómo se decide:**
+- **Línea base:** E1–E3 con el modelo actual.
+- **Comparación:** la recuperación de cada candidato.
+- **Criterio:** e5-small evita la migración, pero pierde q05. e5-large recupera las diez preguntas,
+  a cambio de la migración a `vector(1024)`, el tamaño de la imagen y la latencia.
+- **Si se cambia de modelo:** migración, prefijos en el adaptador, reindexado, y E1–E3 otra vez
+  contra la línea base.
+
+---
+
 ## PR 5 — Evaluador jev
 
 Añade un segundo `CandidateAssessor` sobre un modelo de decisión. Nada fuera del adaptador cambia:

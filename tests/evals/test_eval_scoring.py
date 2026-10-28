@@ -7,6 +7,7 @@ from tests.evals.harness import (
     EvalQuestion,
     SelectorRun,
     accuracy_line,
+    baseline_lines,
     is_correct,
     load_dataset,
     outcome_of,
@@ -131,6 +132,26 @@ class TestHarness:
         assert run.reachable is False
         assert replace(run, question=NO_RECOMMENDATION).reachable is True
 
+    def test_baseline_gives_end_to_end_and_selector_only(self) -> None:
+        good = _candidate("MT-0002", 0.9)
+        missing = _candidate("MT-0001", 0.9)
+        runs = [
+            _run(RECOMMEND, "chosen:MT-0002", good),
+            _run(replace(RECOMMEND, id="q06"), "chosen:MT-0001", missing),
+            _run(NO_RECOMMENDATION, "below_threshold", missing),
+        ]
+
+        end_to_end, selector_only = baseline_lines(runs)
+
+        assert end_to_end == (
+            "end-to-end 2/3: recommend 1/2, no_recommendation 1/1; "
+            "retrieval ceiling 2/3 (q06: no acceptable SKU among the candidates)"
+        )
+        assert selector_only == (
+            "selector only 2/2: recommend 1/1, no_recommendation 1/1 "
+            "(questions with an acceptable SKU among the candidates)"
+        )
+
     async def test_api_calls_flag_many_rate_limits(self) -> None:
         calls = ApiCalls(requests=20)
         calls.statuses[200] = 19
@@ -150,4 +171,15 @@ def _candidate(sku: str, score: float) -> Candidate:
         currency="EUR",
         content=sku,
         retrieval_score=score,
+    )
+
+
+def _run(question: EvalQuestion, outcome: str, candidate: Candidate) -> SelectorRun:
+    return SelectorRun(
+        question=question,
+        outcome=outcome,
+        latency_ms=1,
+        candidates=(candidate,),
+        assessments=(),
+        unassessed=0,
     )
