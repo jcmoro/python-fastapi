@@ -122,6 +122,32 @@ candidatos a la vez.
 **Propuesta:** quedarse con una sola reejecución. Llamarla «E2 · Estabilidad (orden barajado)»
 cubre ambas preguntas con 300 llamadas y deja el total en unas **930**.
 
+**Decisión del usuario:** se ejecutan E2 y E3. Total previsto: ~1.230 llamadas.
+
+### Harness
+
+- **Ficheros:** `tests/evals/` (`harness.py`, `conftest.py`, `test_eval_selector.py` con E1–E3,
+  `test_eval_agent.py` con E4). Llevan el marcador `eval`, que `pytest` excluye por defecto, y se
+  lanzan con `make eval`.
+- **Clave:** `make eval` monta `.env` en solo lectura. La clave se lee del fichero y no aparece en
+  ningún comando.
+- **Base de datos:** se crea `catalog_eval` en el servidor de `db-test` y se migra con `alembic`.
+  Después se cargan los 20 productos con IDs `uuid5` fijos y se indexan con los embeddings locales.
+- **Informe:**
+  - una línea por eval que dice qué mide;
+  - aciertos en recuentos por tipo de pregunta;
+  - tokens y coste estimado;
+  - llamadas contestadas frente a hechas, y los 429.
+  - E1 añade la tabla de umbrales, recalculada con `select` sobre las mismas evaluaciones. Usa
+    fracciones exactas (1/3, 2/3, 1) para que «0,67» signifique «2 de 3».
+- **Parada por 429:** la ejecución se detiene con un informe parcial si los 429 superan el 5 % de
+  las peticiones.
+- **Tests de la regla de puntuación:** `test_eval_scoring.py` no lleva el marcador y corre en
+  `make test`.
+- **Techo de recuperación** (comprobado sin llamadas a la API): el SKU aceptable no está en el
+  top 10 de la recuperación en q06 (`MT-0020`) ni en q10 (`MT-0017`). En q09 faltan 2 de sus 4.
+  Por eso E1–E3 llegan como mucho a 8/10, y el informe lo muestra en la columna `reachable`.
+
 ## Correcciones tras la code review (3b)
 
 La revisión (`/code-review`, lanzada por el usuario) dio 10 hallazgos y se comprobó cada uno contra el

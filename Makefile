@@ -1,4 +1,4 @@
-.PHONY: help install run up down stop sh test unit-test integration-test e2e-test lint format build migrate migration migrate-test reindex
+.PHONY: help install run up down stop sh test unit-test eval integration-test e2e-test lint format build migrate migration migrate-test reindex
 
 DC = docker compose
 SERVICE = api
@@ -29,6 +29,9 @@ test: ## Run the full test suite
 
 unit-test: ## Run unit tests only
 	$(DC) run --rm $(SERVICE) pytest tests/unit
+
+eval: ## Run the evals against the real Claude API (reads the key from .env)
+	$(DC) run --rm -v $(CURDIR)/.env:/app/.env:ro $(SERVICE) pytest -m eval -s -p no:cacheprovider tests/evals
 
 integration-test: ## Run integration tests
 	$(DC) run --rm $(SERVICE) pytest tests/integration
