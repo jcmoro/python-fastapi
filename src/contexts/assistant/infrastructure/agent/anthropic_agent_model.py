@@ -1,7 +1,7 @@
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
-from anthropic import AsyncAnthropic
+from anthropic import AsyncAnthropic, omit
 from anthropic.types import (
     ContentBlockParam,
     MessageParam,
@@ -58,21 +58,13 @@ class AnthropicAgentModel:
         tools: Sequence[ToolParam] | None,
     ) -> ModelTurn:
         with transient_errors_as_unavailable():
-            if tools:
-                message = await self._client.messages.create(
-                    model=self._model,
-                    max_tokens=self._max_tokens,
-                    system=system,
-                    messages=list(messages),
-                    tools=list(tools),
-                )
-            else:
-                message = await self._client.messages.create(
-                    model=self._model,
-                    max_tokens=self._max_tokens,
-                    system=system,
-                    messages=list(messages),
-                )
+            message = await self._client.messages.create(
+                model=self._model,
+                max_tokens=self._max_tokens,
+                system=system,
+                messages=list(messages),
+                tools=list(tools) if tools else omit,
+            )
 
         content: list[ContentBlockParam] = []
         calls: list[ToolCall] = []
