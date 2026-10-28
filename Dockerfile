@@ -22,6 +22,8 @@ RUN pip install "fastembed>=0.9.1" \
 COPY pyproject.toml ./
 COPY src ./src
 COPY main.py ./
+COPY alembic.ini ./
+COPY alembic ./alembic
 
 RUN pip install -e ".[dev]"
 
