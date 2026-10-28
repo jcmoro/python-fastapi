@@ -5,7 +5,7 @@ from contexts.assistant.domain.ports.catalog_reader import CatalogReader
 from contexts.assistant.domain.ports.document_index import DocumentIndex
 from contexts.assistant.domain.ports.document_search import DocumentSearch
 from contexts.assistant.domain.product_document import EmbeddedDocument
-from contexts.assistant.domain.retrieved_document import RetrievedDocument
+from contexts.assistant.domain.retrieved_document import IndexedProduct, RetrievedDocument
 
 
 class FakeCatalogReader(CatalogReader):
@@ -64,10 +64,18 @@ class FakeDocumentIndex(DocumentIndex):
 
 
 class FakeDocumentSearch(DocumentSearch):
-    def __init__(self, results: list[RetrievedDocument] | None = None) -> None:
+    def __init__(
+        self,
+        results: list[RetrievedDocument] | None = None,
+        products: list[IndexedProduct] | None = None,
+    ) -> None:
         self._results = list(results or [])
+        self._products = {product.sku: product for product in products or []}
         self.calls: list[tuple[list[float], int]] = []
 
     async def search(self, embedding: list[float], k: int) -> list[RetrievedDocument]:
         self.calls.append((embedding, k))
         return self._results[:k]
+
+    async def find_by_sku(self, sku: str) -> IndexedProduct | None:
+        return self._products.get(sku)

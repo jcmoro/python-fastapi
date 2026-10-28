@@ -77,6 +77,7 @@ class TestFailures:
 
         assert result.product_id == ok.product_id
         assert result.reason is SelectionReason.CHOSEN
+        assert result.sku == ok.sku
 
     async def test_a6_all_failing_falls_back_to_retrieval_order(self) -> None:
         candidates = _candidates(3)
@@ -87,6 +88,7 @@ class TestFailures:
         assert result.product_id is None
         assert result.fallback_used is True
         assert result.reason is SelectionReason.NO_ASSESSMENTS
+        assert result.sku is None
         assert [c.product_id for c in result.candidates] == [c.product_id for c in candidates]
 
     async def test_a6_a_configuration_error_propagates(self) -> None:

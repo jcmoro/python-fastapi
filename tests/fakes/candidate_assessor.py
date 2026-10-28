@@ -24,6 +24,7 @@ class FakeCandidateAssessor(CandidateAssessor):
         self._delays = delays or {}
         self._default = default
         self.assessed: list[UUID] = []
+        self.questions: list[str] = []
         self.in_flight = 0
         self.max_in_flight = 0
         self.cancelled = 0
@@ -38,6 +39,7 @@ class FakeCandidateAssessor(CandidateAssessor):
 
     async def assess(self, question: str, candidate: Candidate) -> Assessment:
         self.assessed.append(candidate.product_id)
+        self.questions.append(question)
         self.in_flight += 1
         self.max_in_flight = max(self.max_in_flight, self.in_flight)
         try:

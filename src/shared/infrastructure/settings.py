@@ -64,6 +64,13 @@ class Settings(BaseSettings):
         description="Only load the model from the cache, never download it. "
         "The Docker image bakes the model in and sets this to true.",
     )
+    assistant_mode: Literal["rag", "agent"] = Field(
+        default="rag",
+        description="'rag' answers with retrieval + one LLM call; 'agent' runs the tool agent.",
+    )
+    agent_max_tool_calls: int = Field(
+        default=5, ge=1, description="Tool calls per agent run before falling back to RAG mode."
+    )
     selector_provider: Literal["claude"] = Field(
         default="claude",
         description="Candidate assessor used by the recommendation tool.",

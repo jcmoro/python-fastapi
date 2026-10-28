@@ -1,5 +1,5 @@
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 from fastapi import FastAPI
 
@@ -10,10 +10,17 @@ from shared.infrastructure.exception_handlers import register_exception_handlers
 from shared.infrastructure.settings import get_settings
 
 
-@asynccontextmanager
-async def _warm_up_models(_application: FastAPI) -> AsyncIterator[None]:
-    await assistant_lifespan.warm_up_embeddings()
-    yield
+def _lifespan(*, warm_up_models: bool) -> Callable[[FastAPI], AbstractAsyncContextManager[None]]:
+    @asynccontextmanager
+    async def lifespan(_application: FastAPI) -> AsyncIterator[None]:
+        if warm_up_models:
+            await assistant_lifespan.warm_up_embeddings()
+        try:
+            yield
+        finally:
+            await assistant_lifespan.close_anthropic_client()
+
+    return lifespan
 
 
 def create_app(*, warm_up_models: bool = False) -> FastAPI:
@@ -26,7 +33,7 @@ def create_app(*, warm_up_models: bool = False) -> FastAPI:
         docs_url="/docs",
         redoc_url="/redoc",
         openapi_url="/openapi.json",
-        lifespan=_warm_up_models if warm_up_models else None,
+        lifespan=_lifespan(warm_up_models=warm_up_models),
     )
 
     @application.get(

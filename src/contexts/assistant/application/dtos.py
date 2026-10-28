@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from contexts.assistant.domain.agent import AgentRecommendation, AgentStopReason
 from contexts.assistant.domain.candidate import Candidate
 from contexts.assistant.domain.completion import Completion
 from contexts.assistant.domain.retrieved_document import RetrievedDocument
@@ -34,11 +35,30 @@ class SourceDTO:
 
 
 @dataclass(frozen=True, slots=True)
+class RecommendationSummaryDTO:
+    product_id: UUID | None
+    sku: str | None
+    score: float | None
+    reason: SelectionReason
+
+    @classmethod
+    def from_agent(cls, recommendation: AgentRecommendation) -> RecommendationSummaryDTO:
+        return cls(
+            product_id=recommendation.product_id,
+            sku=recommendation.sku,
+            score=recommendation.score,
+            reason=recommendation.reason,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class AnswerDTO:
     text: str
     sources: tuple[SourceDTO, ...]
     fallback_used: bool
     usage: UsageDTO | None
+    recommendation: RecommendationSummaryDTO | None = None
+    stop_reason: AgentStopReason | None = None
 
     @classmethod
     def from_completion(cls, completion: Completion, sources: tuple[SourceDTO, ...]) -> AnswerDTO:
@@ -90,6 +110,7 @@ class CandidateDTO:
 @dataclass(frozen=True, slots=True)
 class RecommendationDTO:
     product_id: UUID | None
+    sku: str | None
     score: float | None
     reason: SelectionReason
     fallback_used: bool

@@ -1,20 +1,34 @@
 from uuid import uuid4
 
 import pytest
+from tests.fakes.catalog_agent import FakeCatalogAgent
 from tests.fakes.documents import FakeDocumentSearch
 from tests.fakes.embedding_client import FakeEmbeddingClient
 from tests.fakes.llm_client import FakeLLMClient
 
-from contexts.assistant.application.dtos import AnswerDTO, AskCommand, SourceDTO, UsageDTO
+from contexts.assistant.application.dtos import (
+    AnswerDTO,
+    AskCommand,
+    RecommendationSummaryDTO,
+    SourceDTO,
+    UsageDTO,
+)
 from contexts.assistant.application.use_cases.ask_assistant import (
     FALLBACK_WITH_SOURCES,
     FALLBACK_WITHOUT_SOURCES,
     SYSTEM_PROMPT,
     AskAssistant,
 )
+from contexts.assistant.domain.agent import (
+    AgentRecommendation,
+    AgentResult,
+    AgentStopReason,
+    AgentUsage,
+)
 from contexts.assistant.domain.completion import Completion
 from contexts.assistant.domain.exceptions import InvalidQuestionError
 from contexts.assistant.domain.retrieved_document import RetrievedDocument
+from contexts.assistant.domain.selection import SelectionReason
 
 QUESTION_VECTOR = [0.0, 1.0, 0.0]
 WIDGET = RetrievedDocument(
@@ -161,3 +175,70 @@ class TestFallback:
         assert result.fallback_used is True
         assert result.sources == ()
         assert result.text == FALLBACK_WITHOUT_SOURCES
+
+
+AGENT_RESULT = AgentResult(
+    text="Take the winter boot.",
+    sources=(WIDGET,),
+    recommendation=AgentRecommendation(
+        product_id=WIDGET.product_id, sku="W-1", score=1.0, reason=SelectionReason.CHOSEN
+    ),
+    stop_reason=AgentStopReason.ANSWERED,
+    usage=AgentUsage(
+        model="claude-test", tool_calls=2, input_tokens=300, output_tokens=40, latency_ms=900
+    ),
+)
+
+
+class TestAgentMode:
+    async def test_delegates_to_the_agent_and_maps_its_result(
+        self, embeddings: FakeEmbeddingClient, search: FakeDocumentSearch
+    ) -> None:
+        agent = FakeCatalogAgent(AGENT_RESULT)
+        use_case = AskAssistant(
+            FakeLLMClient(), embeddings, search, max_tokens=256, top_k=5, agent=agent
+        )
+
+        result = await use_case.execute(AskCommand(question="  Which boot for winter?  "))
+
+        assert agent.questions == ["Which boot for winter?"]
+        assert result.text == "Take the winter boot."
+        assert result.sources == (SourceDTO.from_retrieved(WIDGET),)
+        assert result.fallback_used is False
+        assert result.usage == UsageDTO(
+            model="claude-test", input_tokens=300, output_tokens=40, latency_ms=900
+        )
+        assert result.recommendation == RecommendationSummaryDTO(
+            product_id=WIDGET.product_id, sku="W-1", score=1.0, reason=SelectionReason.CHOSEN
+        )
+        assert result.stop_reason is AgentStopReason.ANSWERED
+
+    async def test_agent_unavailable_falls_back_to_retrieval_without_generation(
+        self, embeddings: FakeEmbeddingClient, search: FakeDocumentSearch
+    ) -> None:
+        use_case = AskAssistant(
+            FakeLLMClient(),
+            embeddings,
+            search,
+            max_tokens=256,
+            top_k=5,
+            agent=FakeCatalogAgent(fail=True),
+        )
+
+        result = await use_case.execute(AskCommand(question="What is a widget?"))
+
+        assert result.fallback_used is True
+        assert result.usage is None
+        assert result.recommendation is None
+        assert result.sources == (
+            SourceDTO.from_retrieved(WIDGET),
+            SourceDTO.from_retrieved(GADGET),
+        )
+
+    async def test_rag_mode_has_no_recommendation_and_no_stop_reason(
+        self, use_case: AskAssistant
+    ) -> None:
+        result = await use_case.execute(AskCommand(question="What is a widget?"))
+
+        assert result.recommendation is None
+        assert result.stop_reason is None
