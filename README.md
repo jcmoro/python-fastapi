@@ -4,13 +4,14 @@
 
 **Generative AI on FastAPI, done the clean way.**
 
-A reference **Generative AI backend** in Python: a **RAG** assistant that answers from a product catalog, built with **FastAPI**, **Domain-Driven Design (DDD)** and the **Hexagonal (Ports & Adapters)** pattern. The LLM, the embeddings and the vector store are adapters behind ports — swap providers, fake them in tests, and keep them out of your domain.
+A reference **Generative AI backend** in Python: a **RAG** assistant that answers from a product catalog, with an optional **LangGraph agent** that recommends products by rules, not by the model's word. Built with **FastAPI**, **Domain-Driven Design (DDD)** and the **Hexagonal (Ports & Adapters)** pattern. The LLM, the embeddings and the vector store are adapters behind ports — swap providers, fake them in tests, and keep them out of your domain.
 
 [![CI](https://github.com/jcmoro/python-fastapi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jcmoro/python-fastapi/actions/workflows/ci.yml)
-![Tests](https://img.shields.io/badge/tests-192%20passing-2e7d32?style=flat)
+![Tests](https://img.shields.io/badge/tests-272%20passing-2e7d32?style=flat)
 ![Architecture](https://img.shields.io/badge/architecture-DDD%20%2B%20Hexagonal-2e7d32?style=flat)
 ![mypy](https://img.shields.io/badge/mypy-strict-1565c0?style=flat)
-![GenAI](https://img.shields.io/badge/GenAI-RAG%20assistant-6a1b9a?style=flat)
+![GenAI](https://img.shields.io/badge/GenAI-RAG%20%2B%20agent-6a1b9a?style=flat)
+![LangGraph](https://img.shields.io/badge/agent-LangGraph-1c3c3c?style=flat)
 ![pgvector](https://img.shields.io/badge/vectors-pgvector-336791?style=flat&logo=postgresql&logoColor=white)
 ![Claude](https://img.shields.io/badge/LLM-Claude-D97757?style=flat&logo=anthropic&logoColor=white)
 ![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)
@@ -41,6 +42,9 @@ Most GenAI demos wire the SDK straight into the route handler. This one treats t
 - **Indexing is explicit and incremental.** `make reindex` re-embeds only products whose content or embedding model changed (a `content_hash` per document), in batches, and deletes documents only after confirming their product no longer exists. `catalog` doesn't know the assistant exists.
 - **Tests never call a real model.** Unit and e2e tests use fakes at the port boundary (`FakeLLMClient`, `FakeEmbeddingClient`, `FakeDocumentSearch`). The real LLM adapter is tested against a mocked HTTP transport, and the vector adapters against a real pgvector database.
 - **Failures have a contract.** If the LLM is unavailable (connection, timeout, 429, 5xx), or its answer is cut off by the token limit or refused, the answer still comes back — **200** with the retrieved products and `fallback_used: true`. Configuration errors (bad key, unknown model) are not disguised as outages.
+- **The model doesn't pick the product.** In agent mode, `recommend_candidate` asks Claude two yes/no rubric questions per candidate (3 samples each) and a pure `select()` function filters, ranks and applies thresholds. `recommendation` comes only from that selection, never from the model's text.
+- **The agent is bounded.** At most `AGENT_MAX_TOOL_CALLS` tool calls per question; past that it answers in RAG mode with what it retrieved. A transient failure mid-run keeps the recommendation and sources gathered so far.
+- **Evals are opt-in and honest.** `make eval` runs the selector and the full agent against a fixed 20-product dataset in its own database, reports results as counts, and stops if the API rate-limits too much. They never run in `make test` or CI.
 - **Latency is bounded.** `LLM_TIMEOUT_S` applies per attempt and `LLM_MAX_RETRIES` defaults to 0, so the worst case is `timeout * (retries + 1)`.
 - **Every answer reports its cost.** Responses include the model used, input/output tokens and latency.
 
@@ -76,9 +80,14 @@ Example response (values are illustrative):
     "input_tokens": 52,
     "output_tokens": 87,
     "latency_ms": 1240
-  }
+  },
+  "recommendation": null
 }
 ```
+
+`recommendation` is always present. It is `null` in `rag` mode, and in `agent` mode when the agent did not run the selector. When the selector ran, it is an object: `{"product_id", "sku", "score", "reason"}`, where `reason` is `chosen`, `below_threshold` or `no_assessments`, and `product_id`, `sku` and `score` are non-null only when `reason` is `chosen`.
+
+Agent mode is off by default. Turn it on with `ASSISTANT_MODE=agent`: the agent then has three tools, `semantic_search`, `get_product_by_sku` and `recommend_candidate`.
 
 | Status | When |
 |--------|------|
@@ -98,7 +107,7 @@ Delivered as small, shippable PRs. Full plan: [`docs/plan-assistant-genai.md`](d
 |------|-------|--------|
 | 1 | `LLMClient` port, Anthropic adapter, `POST /assistant/ask`, failure contract | ✅ Done |
 | 2 | **RAG** with `pgvector` in the existing Postgres: local multilingual embeddings behind a port, incremental `make reindex`, top-k retrieval, `sources` in the answer, deterministic fallback when the LLM fails | ✅ Done |
-| 3 | **Agent** with LangGraph: catalog tools, step limits, token usage summed across steps, offline evals | ⏳ Planned |
+| 3 | **Agent** with LangGraph: candidate selection by rubric and pure `select()` (3a), agent with catalog tools, step limit and summed token usage (3b), evals E1–E4 | 🔄 3a done, 3b in review |
 | 4 | **Deploy**: Kubernetes manifests, local `kind` cluster, optional cloud target | ⏳ Planned |
 
 ---
@@ -178,6 +187,7 @@ src/
         assessment_usage.py            # API calls and tokens per assessment
         rubric.py                      # The two yes/no rubric questions, defined once
         selection.py                   # select(): filter, rank, tie-break, threshold — pure
+        agent.py                       # AgentResult, stop reasons, AgentUnavailableError (partial state)
         exceptions.py                  # InvalidQuestionError, LLMUnavailableError, InvalidAssessmentError
         ports/
           llm_client.py                # LLMClient ABC — documents which failures it raises
@@ -186,10 +196,11 @@ src/
           document_index.py            # Hashes, upsert, delete
           catalog_reader.py            # Products from the catalog, no duplicates
           candidate_assessor.py        # One candidate per call; probabilities in [0, 1]
+          catalog_agent.py             # Step limit, model_incomplete, partial state on failure
       application/
         dtos.py                        # Ask/Answer/Source/Usage/IndexReport/Candidate/Recommendation DTOs
         use_cases/
-          ask_assistant.py             # Embed → retrieve → generate, fallback without generation
+          ask_assistant.py             # Embed → retrieve → generate, or the agent; fallback without generation
           index_catalog.py             # Incremental reindex + orphan deletion (before upsert)
           recommend_candidate.py       # Top-N, deadline, cancellation, select(), one log line
       infrastructure/                  # The only place anthropic, fastembed and pgvector live.
@@ -197,6 +208,10 @@ src/
           anthropic_errors.py          # Shared transient-vs-configuration classification
           anthropic_llm_client.py      # Timeout, retries, error classification
           claude_candidate_assessor.py # Rubric via structured output; 3 samples; per-call concurrency limit
+        agent/
+          anthropic_agent_model.py     # One messages.create per turn; keeps every content block
+          langgraph_catalog_agent.py   # Graph: model → tools → model, RAG answer past the limit
+          tools.py                     # Tool definitions, dispatch, question embedded once per run
         embeddings/
           fastembed_embedding_client.py
         persistence/
@@ -258,6 +273,7 @@ make test               # Full test suite (never calls a real model)
 make unit-test          # Unit tests only (no I/O)
 make integration-test   # Integration tests (real postgres, mocked LLM transport)
 make e2e-test           # E2E tests (HTTP via TestClient/AsyncClient)
+make eval               # Evals E1–E4 against the real Claude API (reads the key from .env; costs money)
 make lint               # ruff + pylint + mypy
 make format             # auto-format
 make sh                 # Shell into a fresh api container
@@ -266,6 +282,8 @@ make migration m="add foo"  # Generate a new Alembic migration via autogenerate
 ```
 
 LLM settings (all in `.env.example`): `ANTHROPIC_API_KEY`, `LLM_MODEL` (default `claude-haiku-5-5`), `LLM_TIMEOUT_S`, `LLM_MAX_RETRIES`, `LLM_MAX_TOKENS`. Retrieval: `EMBEDDING_MODEL` (default `sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2`) and `RAG_TOP_K` (default 5, max 40). The embedding model (~0.24 GB) is **baked into the Docker image at build time**; at runtime it is only loaded from disk (`EMBEDDING_LOCAL_FILES_ONLY=true`, never downloaded) and warmed up when the app starts, so computing embeddings needs no network (the LLM call still does).
+
+Assistant mode: `ASSISTANT_MODE` (`rag` by default, or `agent`) and `AGENT_MAX_TOOL_CALLS` (default 5). Candidate selector: `SELECTOR_TOP_N` (10), `SELECTOR_SAMPLES` (3), `SELECTOR_MAX_CONCURRENCY` (10), `SELECTOR_TIMEOUT_S` (10), `SELECTOR_MAX_TOKENS` (1024), `SELECTOR_REQUIREMENTS_THRESHOLD` (0.5) and `SELECTOR_MIN_SCORE` (0.5).
 
 API is served on `http://localhost:8000` with auto-generated docs:
 
@@ -281,6 +299,7 @@ API is served on `http://localhost:8000` with auto-generated docs:
 |--------------|------------------------|-------------------------------------------------------------|
 | Unit         | `tests/unit/`          | Pure domain and application logic. Mocks at the port boundary via `FakeProductRepository`, `FakeLLMClient`, `FakeEmbeddingClient`, `FakeDocumentIndex` and `FakeDocumentSearch`. Covers incremental indexing and orphan deletion. **No I/O.** |
 | Integration  | `tests/integration/`   | Real `SqlAlchemyProductRepository` against `db-test` (transaction-rollback per test). Real `AnthropicLLMClient` on an `httpx2.MockTransport`: error classification and retry bound. Real pgvector adapters: upsert, hashes, delete, nearest-first search. Catalog reader across pages. |
-| E2E          | `tests/e2e/`           | Full HTTP via `httpx.AsyncClient` + `ASGITransport`. The DB session, `LLMClient`, `EmbeddingClient` and `DocumentSearch` are overridden; covers sources, fallback and that no indexing endpoint exists. Each domain error is checked against its status code. |
+| E2E          | `tests/e2e/`           | Full HTTP via `httpx.AsyncClient` + `ASGITransport`. The DB session, `LLMClient`, `EmbeddingClient` and `DocumentSearch` are overridden; covers sources, fallback and that no indexing endpoint exists. Each domain error is checked against its status code. In agent mode the agent is a `FakeCatalogAgent`, and `rag` mode is checked never to build the agent. |
+| Evals        | `tests/evals/`         | Opt-in (`eval` marker, `make eval`), against the real Claude API. E1: selector accuracy; E2: same outcome with shuffled candidates; E3: same outcome on a rerun; E4: full agent end to end. The scoring rule's own tests are not marked and run in `make test`. |
 
 ---
