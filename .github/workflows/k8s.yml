@@ -1,0 +1,63 @@
+name: k8s
+
+on:
+  pull_request:
+    paths:
+      - k8s/**
+      - Dockerfile
+      - Makefile
+      - alembic/**
+      - .github/workflows/k8s.yml
+  workflow_dispatch:
+
+concurrency:
+  group: k8s-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  kind:
+    name: Deploy to kind and call /healthz
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build api image (with GHA layer cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          tags: fastapi-api:latest
+          cache-from: type=gha,scope=fastapi-api
+          cache-to: type=gha,mode=max,scope=fastapi-api
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.15.1
+        with:
+          cluster_name: catalog
+
+      - name: Deploy (migrate, reindex, api)
+        run: make k8s-deploy
+
+      - name: Smoke test through the Service
+        run: make k8s-smoke
+
+      - name: Diagnostics on failure
+        if: failure()
+        run: |
+          kubectl --context kind-catalog -n catalog get pods,jobs
+          kubectl --context kind-catalog -n catalog logs job/migrate --tail=50 || true
+          kubectl --context kind-catalog -n catalog logs job/reindex --tail=50 || true
+          kubectl --context kind-catalog -n catalog logs deployment/api --tail=100 || true

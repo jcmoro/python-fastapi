@@ -108,7 +108,7 @@ Delivered as small, shippable PRs. Full plan: [`docs/plan-assistant-genai.md`](d
 | 1 | `LLMClient` port, Anthropic adapter, `POST /assistant/ask`, failure contract | ✅ Done |
 | 2 | **RAG** with `pgvector` in the existing Postgres: local multilingual embeddings behind a port, incremental `make reindex`, top-k retrieval, `sources` in the answer, deterministic fallback when the LLM fails | ✅ Done |
 | 3 | **Agent** with LangGraph: candidate selection by rubric and pure `select()` (3a), agent with catalog tools, step limit and summed token usage (3b), evals E1–E4 | ✅ Done |
-| 4 | **Deploy**: Kubernetes manifests, local `kind` cluster, optional cloud target | ⏳ Planned |
+| 4 | **Deploy**: Kubernetes manifests (api, Postgres + pgvector, migrate and reindex Jobs), local `kind` cluster, CI smoke test | ✅ Done |
 
 ---
 
@@ -290,6 +290,21 @@ API is served on `http://localhost:8000` with auto-generated docs:
 - `/docs` — Swagger UI (interactive)
 - `/redoc` — [ReDoc](https://github.com/Rebilly/ReDoc) (alternative reference UI)
 - `/openapi.json` — raw OpenAPI schema (importable into Postman, OpenAPI generators, etc.)
+
+### Kubernetes (local, with kind)
+
+**Prerequisites:** [`kind`](https://kind.sigs.k8s.io/) and `kubectl`.
+
+```bash
+make k8s-up      # Build the image, create the kind cluster, deploy Postgres, run migrate → reindex, roll out the api
+make k8s-smoke   # GET /healthz and GET /products through the api Service
+make k8s-down    # Delete the cluster
+```
+
+- **Manifests:** they live in [`k8s/`](k8s/) as a kustomization, with the migrate and reindex Jobs in `k8s/jobs/`. `make k8s-deploy` runs them in order and is safe to re-run.
+- **Secrets:** `make` creates them; `k8s/secrets.example.yaml` only documents the keys. `ANTHROPIC_API_KEY` is piped from `.env` through stdin, so it never appears in a command. Without it, `rag` mode still answers with the fallback.
+- **Embeddings:** the model is baked into the image, so the pods never download it.
+- **CI:** the `k8s` workflow runs the same deploy and smoke test on a kind cluster when the manifests, `Dockerfile`, `Makefile` or migrations change.
 
 ---
 
