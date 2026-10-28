@@ -315,20 +315,38 @@ rúbrica.
 - Infraestructura — `infrastructure/agent/langgraph_catalog_agent.py`: un grafo pequeño con las
   herramientas `semantic_search` (usa `DocumentSearch`), `get_product_by_sku` (lee el read model) y
   `recommend_candidate` (más abajo), y después un nodo de respuesta final.
-  - El LLM del agente va por `langchain-anthropic`, que es un segundo camino hacia Anthropic fuera de
-    `AnthropicLLMClient`. El adaptador del agente **traduce sus errores a `LLMUnavailableError` con
-    la misma clasificación** que el PR 1 (transitorios frente a configuración) y aplica **el mismo
-    timeout**.
+  - **LangGraph solo orquesta.** El nodo del modelo llama al SDK de Anthropic directamente
+    (tool use) a través de nuestro adaptador en `infrastructure/agent/`, reutilizando **el único
+    cliente** del asistente y **la clasificación de errores del PR 1**. No se usa `langchain-anthropic`:
+    su última versión (1.7.6) exige `anthropic<2.0.0` y el proyecto usa 2.3.0.
+  - **Cada herramienta se define una vez** (esquema + handler); de esa definición se derivan tanto las
+    definiciones de herramientas que se envían a la API como el nodo de herramientas del grafo.
 - Límites — **como mucho 5 llamadas a herramientas por ejecución** (`recommend_candidate` cuenta
-  como una). Al llegar al límite, el agente responde en modo RAG con lo recuperado y registra la
-  razón `max_steps`. Lista blanca de herramientas, el mismo timeout que el PR 1 y el mismo fallback
+  como una), con **un contador en el estado del grafo y una arista condicional** que, al llegar al
+  límite, pasa a responder en modo RAG con lo recuperado y registra la razón `max_steps`.
+  `recursion_limit` queda solo como red de seguridad. Lista blanca de herramientas, el mismo timeout que el PR 1 y el mismo fallback
   que el PR 2, con el uso de tokens sumado entre pasos.
 - `AskAssistant` delega en el agente según un setting (`assistant_mode = "rag" | "agent"`), **`rag`
-  por defecto**: el agente es opt-in hasta que las evals demuestren que es mejor. Los e2e del PR 2
-  no cambian.
+  por defecto**: el agente es opt-in hasta que las evals demuestren que es mejor. El comportamiento en
+  `rag` no cambia; los e2e del PR 2 solo ganan la clave `"recommendation": None` en el diccionario
+  esperado, porque el contrato ganó un campo aditivo.
 - Dependencias — los proveedores de `RecommendCandidate` y del evaluador se añaden aquí (no en 3a),
   reutilizando **el único cliente de Anthropic del asistente**, que se cierra en el lifespan.
-- `pyproject.toml` — añadir `langgraph` y `langchain-anthropic`.
+- `pyproject.toml` — añadir solo `langgraph` (>= 1.2.18). Comprobado con el resolver: con todas las
+  dependencias del proyecto, `anthropic` se queda en 2.3.0 y no entra ningún otro paquete de
+  Anthropic.
+- **Contrato** — `AnswerResponse` gana un campo opcional y nullable `recommendation:
+  {product_id, sku, score, reason} | null`. Es aditivo, así que no rompe a los clientes, y el esquema
+  es el mismo en los dos modos. Sus valores salen de la `Selection` del selector, **nunca del texto
+  del modelo**.
+  - `null` cuando **el selector no se ejecutó**: modo `rag`, o el agente respondió sin recomendar.
+  - **Objeto** cuando se ejecutó. `reason` ∈ `chosen` | `below_threshold` | `no_assessments`, y
+    `product_id`, `sku` y `score` son no nulos **si y solo si** `reason == "chosen"`. Lo impone un
+    validador de Pydantic, con test.
+  - Un e2e por modo.
+- **Razón de parada del agente** — `answered` | `max_steps`. Es un resultado del agente, no de la
+  selección, así que **no va en `recommendation` ni en la API**: va en el DTO del caso de uso (para
+  las evals) y en el log.
 - Tests — unitarios con un agente falso; un test de integración del cableado del grafo con un modelo
   falso guionizado.
 
@@ -340,9 +358,23 @@ SKU y precio). Por ahora, sin pregunta de seguimiento.
 
 ### Evals (marker `eval`, fuera del CI por defecto)
 
-Necesitan una `ANTHROPIC_API_KEY` real, que el usuario pone en `.env`. Su valor nunca aparece en logs,
-salidas de comandos ni documentos. **Antes de la primera ejecución real se informa del número de
-llamadas** que hará.
+Necesitan la `ANTHROPIC_API_KEY` real, que el usuario ya ha puesto en `.env`. Su valor nunca aparece
+en logs, salidas de comandos, documentos ni mensajes de commit. **Antes de la primera ejecución real
+se informa del número de llamadas y del modelo**, y se espera.
+
+**Dataset** (lo propone Claude Code y lo revisa el usuario antes de cualquier ejecución real):
+
+- Un catálogo ficticio de material de montaña (cualquier dominio salvo viajes), unos 20 productos, y
+  unas 10 preguntas.
+- Las preguntas describen **el uso**, sin reutilizar la redacción de las descripciones de producto.
+- Incluye productos casi idénticos que solo se diferencian en un requisito explícito (color,
+  talla), preguntas cuya respuesta correcta es **no recomendar**, y al menos una pregunta
+  **ambigua**.
+- Cada pregunta tiene un **conjunto de SKUs aceptables**, no uno solo.
+- Versionado en `tests/evals/` y cargado de forma determinista en **su propia base de datos**,
+  nunca en los datos del usuario.
+- Los resultados se informan como **recuentos** («8/10»), no como porcentajes. Las evals comparan
+  `recommendation.sku` con los SKUs aceptables.
 
 - Dataset de preguntas con el SKU esperado.
 - Precisión y cobertura (con qué frecuencia recomienda) para varios valores de `selector_min_score`

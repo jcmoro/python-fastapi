@@ -64,10 +64,18 @@ class FakeDocumentIndex(DocumentIndex):
 
 
 class FakeDocumentSearch(DocumentSearch):
-    def __init__(self, results: list[RetrievedDocument] | None = None) -> None:
+    def __init__(
+        self,
+        results: list[RetrievedDocument] | None = None,
+        products: list[RetrievedDocument] | None = None,
+    ) -> None:
         self._results = list(results or [])
+        self._products = {product.sku: product for product in products or [] if product.sku}
         self.calls: list[tuple[list[float], int]] = []
 
     async def search(self, embedding: list[float], k: int) -> list[RetrievedDocument]:
         self.calls.append((embedding, k))
         return self._results[:k]
+
+    async def find_by_sku(self, sku: str, embedding: list[float]) -> RetrievedDocument | None:
+        return self._products.get(sku)

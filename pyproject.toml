@@ -19,6 +19,7 @@ dependencies = [
     "anthropic>=2.3",
     "pgvector>=0.5.1",
     "fastembed>=0.9.1",
+    "langgraph>=1.2.18",
 ]
 
 [project.optional-dependencies]
@@ -43,7 +44,8 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "session"
 asyncio_default_test_loop_scope = "session"
-addopts = "-q --strict-markers"
+addopts = "-q --strict-markers -m 'not eval'"
+markers = ["eval: evaluations against the real Claude API; run with make eval"]
 pythonpath = ["."]
 
 [tool.ruff]

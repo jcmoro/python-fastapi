@@ -34,8 +34,10 @@ class RecommendCandidate:
         assessments = await self._assess_all(question, top)
         selection = select(top, assessments, self._requirements_threshold, self._min_score)
         self._log(top, assessments, selection, started)
+        chosen = next((c for c in top if c.product_id == selection.product_id), None)
         return RecommendationDTO(
             product_id=selection.product_id,
+            sku=chosen.sku if chosen is not None else None,
             score=selection.score,
             reason=selection.reason,
             fallback_used=selection.fallback_used,

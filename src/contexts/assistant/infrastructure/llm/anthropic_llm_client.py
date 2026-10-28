@@ -32,4 +32,5 @@ class AnthropicLLMClient(LLMClient):
             input_tokens=message.usage.input_tokens,
             output_tokens=message.usage.output_tokens,
             latency_ms=latency_ms,
+            stop_reason=message.stop_reason,
         )

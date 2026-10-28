@@ -74,6 +74,7 @@ class TestAsk:
             "text": "The blue widget costs 19.99 EUR.",
             "sources": [_source_json(WIDGET)],
             "fallback_used": False,
+            "recommendation": None,
             "usage": {
                 "model": "claude-test",
                 "input_tokens": 50,

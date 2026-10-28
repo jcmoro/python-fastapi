@@ -11,15 +11,61 @@ class SqlAlchemyDocumentSearch(DocumentSearch):
         self._session_factory = session_factory
 
     async def search(self, embedding: list[float], k: int) -> list[RetrievedDocument]:
-        distance = ProductDocumentModel.embedding.op("<=>", return_type=Float)(embedding)
+        model = ProductDocumentModel
+        distance = model.embedding.op("<=>", return_type=Float)(embedding)
         stmt = (
-            select(ProductDocumentModel.product_id, ProductDocumentModel.content, distance)
+            select(
+                model.product_id,
+                model.content,
+                distance,
+                model.sku,
+                model.name,
+                model.price_cents,
+                model.currency,
+            )
             .order_by(distance)
             .limit(k)
         )
         async with self._session_factory() as session:
             rows = (await session.execute(stmt)).all()
         return [
-            RetrievedDocument(product_id=product_id, content=content, score=1.0 - float(dist))
-            for product_id, content, dist in rows
+            RetrievedDocument(
+                product_id=product_id,
+                content=content,
+                score=1.0 - float(dist),
+                sku=sku,
+                name=name,
+                price_cents=price_cents,
+                currency=currency,
+            )
+            for product_id, content, dist, sku, name, price_cents, currency in rows
         ]
+
+    async def find_by_sku(self, sku: str, embedding: list[float]) -> RetrievedDocument | None:
+        model = ProductDocumentModel
+        distance = model.embedding.op("<=>", return_type=Float)(embedding)
+        stmt = select(
+            model.product_id,
+            model.content,
+            distance,
+            model.sku,
+            model.name,
+            model.price_cents,
+            model.currency,
+        ).where(model.sku == sku)
+        async with self._session_factory() as session:
+            row = (await session.execute(stmt)).one_or_none()
+        if row is None:
+            return None
+        product_id, content, dist, found_sku, name, price_cents, currency = row
+        if found_sku is None or name is None or price_cents is None or currency is None:
+            return None
+        return RetrievedDocument(
+            product_id=product_id,
+            content=content,
+            score=1.0 - float(dist),
+            sku=found_sku,
+            name=name,
+            price_cents=price_cents,
+            currency=currency,
+        )

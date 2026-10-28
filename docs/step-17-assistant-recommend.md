@@ -197,7 +197,7 @@ Verde de las correcciones: `10 passed` (CR1×2, CR2×3, CR3×2, CR4×2, CR6). CR
 | A8 | ✅ | `test_a8_a_reused_sku_does_not_break_the_reindex` (rojo por el orden → verde); `test_a8_sku_is_unique_in_the_index` contra Postgres real (`IntegrityError`) |
 | A9 | ✅ | `test_a9_one_line_per_selection_with_ids_only`: una sola línea con `provider`, `model`, `candidates`, `assessed`, `api_calls`, tokens, `cost_usd`, `latency_ms`, `reason` y `product_id`; no aparecen SKU, nombre ni texto de la pregunta |
 | A10 | ✅ | `grep` sin resultados: el dominio y la aplicación de `assistant` no importan `anthropic`, `sqlalchemy`, `fastapi`, `pgvector`, `fastembed` ni `httpx`. `catalog` sin cambios. Los e2e del PR 2 sin cambios. Ningún `type: ignore`, `noqa` ni `pylint: disable` nuevo. |
-| A11 | ✅ local | `make lint`: ruff OK, pylint 10.00/10, mypy sin errores (80 ficheros). `make test`: **192 passed** (antes 137), sin avisos de excepciones sin recoger. _CI: pendiente de la PR._ |
+| A11 | ✅ | `make lint`: ruff OK, pylint 10.00/10, mypy sin errores (80 ficheros). `make test`: **192 passed** (antes 137), sin avisos de excepciones sin recoger. **CI de la PR #9:** run `40599241763` sobre `6bbbd65`, en verde (login, build, migraciones, lint y tests en ambos jobs). |
 | A12 | ✅ | Plan con la firma real de `select` y las correcciones CR1–CR6; README con el badge de 192 tests y el layout de los ficheros nuevos |
 
 ### Tests nuevos o ampliados

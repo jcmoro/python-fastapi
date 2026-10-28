@@ -171,3 +171,50 @@ class TestReadModelColumns:
 
         with pytest.raises(IntegrityError):
             await index.upsert([_embedded("second", _vector((1, 1.0)), sku="SKU-DUP")])
+
+
+class TestCatalogFieldsOnRead:
+    async def test_search_results_carry_the_catalog_fields(
+        self, index: SqlAlchemyDocumentIndex, search: SqlAlchemyDocumentSearch
+    ) -> None:
+        item = _embedded("boot", _vector((0, 1.0)), sku="BOOT-1")
+        await index.upsert([item])
+
+        [hit] = await search.search(_vector((0, 1.0)), k=1)
+
+        assert (hit.sku, hit.name, hit.price_cents, hit.currency) == (
+            "BOOT-1",
+            "Name boot",
+            1999,
+            "EUR",
+        )
+
+    async def test_find_by_sku_returns_the_indexed_product(
+        self, index: SqlAlchemyDocumentIndex, search: SqlAlchemyDocumentSearch
+    ) -> None:
+        item = _embedded("tent", _vector((0, 1.0)), sku="TENT-2")
+        await index.upsert([item])
+
+        product = await search.find_by_sku("TENT-2", _vector((0, 1.0)))
+
+        assert product is not None
+        assert (product.product_id, product.name, product.content) == (
+            item.document.product_id,
+            "Name tent",
+            "tent",
+        )
+
+    async def test_rb3_find_by_sku_returns_the_real_cosine_similarity(
+        self, index: SqlAlchemyDocumentIndex, search: SqlAlchemyDocumentSearch
+    ) -> None:
+        await index.upsert([_embedded("tent", _vector((0, 1.0), (1, 1.0)), sku="TENT-3")])
+
+        product = await search.find_by_sku("TENT-3", _vector((0, 1.0)))
+
+        assert product is not None
+        assert product.score == pytest.approx(0.7071, abs=1e-3)
+
+    async def test_find_by_sku_returns_none_for_an_unknown_sku(
+        self, search: SqlAlchemyDocumentSearch
+    ) -> None:
+        assert await search.find_by_sku("NOPE", _vector((0, 1.0))) is None

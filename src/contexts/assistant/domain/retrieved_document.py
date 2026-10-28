@@ -7,3 +7,7 @@ class RetrievedDocument:
     product_id: UUID
     content: str
     score: float
+    sku: str | None = None
+    name: str | None = None
+    price_cents: int | None = None
+    currency: str | None = None
