@@ -47,7 +47,7 @@ Para demostrar que la imagen funciona tal cual fuera de Docker Compose:
 | K4 | Repetir `make k8s-deploy` no tiene efectos y conserva los datos | La segunda ejecución sale con 0; la BD no se reinicia (generación 1, 0 reinicios) y `kubectl diff` sale vacío |
 | K5 | El reindexado calcula los embeddings dentro del pod, sin red | Un producto creado antes del segundo despliegue → `indexed=1` |
 | K6 | La clave no aparece en la salida | 0 apariciones de `sk-ant` en la salida del despliegue; el `Secret` solo contiene `ANTHROPIC_API_KEY` |
-| K7 | El workflow `k8s` pasa en el PR | Enlace al run del PR |
+| K7 | El workflow `k8s` pasa en el PR | [Run del PR #13](https://github.com/jcmoro/python-fastapi/actions/runs/40611790225): «Deploy to kind and call /healthz» en verde (3 min 16 s) |
 
 ## Evidencia (local, kind v0.33.0)
 
