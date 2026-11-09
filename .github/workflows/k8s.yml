@@ -44,7 +44,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=fastapi-api
 
       - name: Create kind cluster
-        uses: helm/kind-action@v1.15.1
+        uses: helm/kind-action@v1.15.2
         with:
           cluster_name: catalog
 
